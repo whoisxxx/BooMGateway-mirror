@@ -1,0 +1,42 @@
+# 组件功能测试门禁 — 各独立模块的功能验证
+# TODO: 待后续实现
+#
+# 计划覆盖:
+#   - misc/LB: 负载均衡器路由策略验证
+#   - hook: Hook SDK 生命周期回调验证
+#   - boom-auth: API key 认证逻辑验证
+#   - boom-routing: 模型路由策略验证
+#   - boom-limiter: 并发限流验证
+#   - boom-flowcontrol: 流控验证
+#   - boom-fusion: 融合路由验证
+#   - boom-kvindex: KV 索引验证
+name: CI Integration
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master, dev]
+  workflow_dispatch:
+
+jobs:
+  placeholder:
+    name: TODO — 组件功能测试待实现
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Notice
+        run: |
+          echo "::notice::组件功能测试尚未实现。"
+          echo ""
+          echo "计划覆盖的测试范围:"
+          echo "  - misc/LB: 负载均衡器路由策略验证"
+          echo "  - hook: Hook SDK 生命周期回调验证"
+          echo "  - boom-auth: API key 认证逻辑验证"
+          echo "  - boom-routing: 模型路由策略验证"
+          echo "  - boom-limiter: 并发限流验证"
+          echo "  - boom-flowcontrol: 流控验证"
+          echo "  - boom-fusion: 融合路由验证"
+          echo "  - boom-kvindex: KV 索引验证"
+          echo ""
+          echo "TODO: 为每个组件编写功能测试用例，验证核心业务逻辑。"

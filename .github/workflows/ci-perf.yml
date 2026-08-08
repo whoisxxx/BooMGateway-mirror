@@ -1,0 +1,110 @@
+# 性能测试门禁
+# 使用 mock-backend 作为后端，bench-client 发压，验证吞吐和延迟基线
+#
+# 流程:
+#   1. 编译 mock-backend (release)
+#   2. 编译 bench-client (release)
+#   3. 启动 mock-backend (后台)
+#   4. 等待 mock-backend 就绪
+#   5. 运行 bench-client 压测 (qps=50, 30s)
+#   6. 上传结果 artifact
+name: CI Performance
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master, dev]
+  workflow_dispatch: # 允许手动触发，可自定义参数
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  perf-bench:
+    name: Bench (mock-backend + bench-client)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev libpq-dev protobuf-compiler cmake
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            boom-gateway/test/bench-client/target
+            boom-gateway/test/mock-backend/target
+          key: cargo-perf-${{ runner.os }}-${{ hashFiles('boom-gateway/test/**/Cargo.lock') }}
+          restore-keys: cargo-perf-${{ runner.os }}-
+
+      # ── 编译 mock-backend ──
+      - name: Build mock-backend
+        run: cd boom-gateway/test/mock-backend && cargo build --release
+
+      # ── 编译 bench-client ──
+      - name: Build bench-client
+        run: cd boom-gateway/test/bench-client && cargo build --release
+
+      # ── 启动 mock-backend (后台) ──
+      - name: Start mock-backend
+        run: |
+          ./boom-gateway/test/mock-backend/target/release/mock-backend \
+            --bind 127.0.0.1:8000 \
+            --max-concurrent 1000 &
+          MOCK_PID=$!
+          echo "MOCK_PID=$MOCK_PID" >> $GITHUB_ENV
+          # 等待服务就绪 (最多 10 秒)
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1; then
+              echo "✅ mock-backend is ready"
+              break
+            fi
+            sleep 0.5
+          done
+
+      # ── 运行压测 ──
+      # 使用 OpenAI 格式，单个测试 key，QPS=50，持续 30 秒
+      - name: Run bench-client (QPS=50, 30s)
+        run: |
+          ./boom-gateway/test/bench-client/target/release/bench-client \
+            --target http://127.0.0.1:8000 \
+            --format openai \
+            --auth-style bearer \
+            --keys sk-perf-test-key \
+            --model test-model \
+            --prompt-min 500 \
+            --prompt-max 2000 \
+            --mode qps=50 \
+            --duration 30s \
+            --report perf-result.json 2>&1 | tee bench-output.txt || true
+
+      # ── 清理 ──
+      - name: Stop mock-backend
+        if: always()
+        run: |
+          if [ -n "$MOCK_PID" ]; then
+            kill $MOCK_PID 2>/dev/null || true
+          fi
+
+      # ── 上传结果 ──
+      - name: Upload perf results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: |
+            perf-result.json
+            bench-output.txt
+          retention-days: 7
+          if-no-files-found: warn

@@ -1,0 +1,55 @@
+# 功能测试门禁 — 单元测试 + 集成测试
+# TODO: 当前仅单元测试，后续增加集成测试（启动服务 + HTTP 探针）
+name: CI Test
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master, dev]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  unit-test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev libpq-dev protobuf-compiler cmake
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-${{ runner.os }}-
+
+      - name: Run unit tests
+        run: cargo test --workspace --all-features
+
+  # TODO: 集成测试 — 待后续实现
+  # integration-test:
+  #   name: Integration tests
+  #   runs-on: ubuntu-latest
+  #   needs: unit-test
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     # 1. 启动 PostgreSQL + Redis (services)
+  #     # 2. 执行数据库迁移
+  #     # 3. 启动 boom-gateway 服务
+  #     # 4. 运行集成测试套件（HTTP 请求验证路由、认证、限流等）
+  #     # 5. 收集覆盖率报告
+  #     - run: echo "TODO: 集成测试待实现"

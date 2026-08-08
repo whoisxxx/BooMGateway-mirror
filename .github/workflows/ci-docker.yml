@@ -1,0 +1,40 @@
+# 镜像构建门禁 — 验证 Dockerfile 可用，不推送
+# TODO: 待编写 Dockerfile 后启用
+name: CI Docker
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master, dev]
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  docker-build:
+    name: Docker build (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Dockerfile exists
+        id: check
+        run: |
+          if [ -f "Dockerfile" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Dockerfile found"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Dockerfile not found, skipping docker build"
+          fi
+
+      - name: Build Docker image
+        if: steps.check.outputs.exists == 'true'
+        run: docker build -t boom-gateway:ci .
+
+      - name: Skip (no Dockerfile)
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          echo "::notice::Dockerfile 尚未创建，镜像构建门禁跳过。"
+          echo "TODO: 编写多阶段 Dockerfile (rust builder + slim runtime)"
+          echo "TODO: 添加 docker buildx 多架构构建 (amd64 + arm64)"
+          echo "TODO: 添加镜像安全扫描 (trivy)"

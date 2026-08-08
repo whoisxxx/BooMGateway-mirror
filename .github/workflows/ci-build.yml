@@ -1,6 +1,6 @@
-# BooMGateway CI — Rust workspace build & test
-# 第一步：在个人仓验证基本流程（build + clippy + test）
-name: CI
+# 编译构建门禁
+# 职责：cargo build (workspace) + 独立 crate 编译 (misc/LB, hook, bench-client, mock-backend)
+name: CI Build
 
 on:
   push:
@@ -13,9 +13,9 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  # ── Job 1: workspace 编译 + clippy ──
-  build-and-lint:
-    name: Build & Clippy
+  # ── Job 1: workspace 编译 ──
+  build-workspace:
+    name: Build workspace
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +27,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -37,52 +35,16 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+          key: cargo-build-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-build-${{ runner.os }}-
 
       - name: Build (workspace, release)
         run: cargo build --workspace --release
 
-  # ── Job 2: workspace 测试 ──
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    needs: build-and-lint
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev libpq-dev protobuf-compiler cmake
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-${{ runner.os }}-
-
-      - name: Run tests
-        run: cargo test --workspace --all-features
-
-  # ── Job 3: 独立子项目编译（misc/LB + hook + bench-client） ──
+  # ── Job 2: 独立子项目编译 ──
   build-standalone:
     name: Build standalone crates
     runs-on: ubuntu-latest
-    needs: build-and-lint
     steps:
       - uses: actions/checkout@v4
 
@@ -118,3 +80,17 @@ jobs:
 
       - name: Build mock-backend
         run: cd boom-gateway/test/mock-backend && cargo build --release
+
+      - name: Upload bench-client binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-client-bin
+          path: boom-gateway/test/bench-client/target/release/bench-client
+          retention-days: 1
+
+      - name: Upload mock-backend binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-backend-bin
+          path: boom-gateway/test/mock-backend/target/release/mock-backend
+          retention-days: 1
