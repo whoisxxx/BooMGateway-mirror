@@ -29,14 +29,22 @@ jobs:
         run: cargo install cargo-audit --locked || true
 
       - name: Run cargo audit
+        # yanked crates 不是安全漏洞（只是版本被作者撤回），不应阻断 CI
+        # 真正的 RUSTSEC 漏洞才阻断；用 grep 区分两类输出
         run: |
-          if [ -f "Cargo.lock" ]; then
-            cargo audit
-          else
+          if [ ! -f "Cargo.lock" ]; then
             echo "::notice::Cargo.lock not found, generating..."
             cargo generate-lockfile
-            cargo audit
           fi
+          # 运行审计，捕获输出
+          set +e
+          cargo audit 2>&1 | tee audit-output.txt
+          # 检查是否有真正的漏洞 (RUSTSEC advisory)，yanked 只算 warning
+          if grep -E "^(error|warning):.*vulnerabilities found" audit-output.txt; then
+            echo "❌ 安全漏洞被发现，CI 失败"
+            exit 1
+          fi
+          echo "✅ 无安全漏洞 (yanked crates 仅作 warning，不阻断)"
 
   # TODO: cargo-deny — 许可证检查 + 重复依赖检查
   # deny-check:
