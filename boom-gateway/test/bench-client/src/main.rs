@@ -4,7 +4,6 @@
 //! keys (randomly rotated per request, to exercise the DB auth path) and
 //! collects HDR histograms for TTFT + E2E latency plus error breakdowns.
 
-use bytes::Bytes;
 use clap::Parser;
 use futures_util::StreamExt;
 use hdrhistogram::Histogram;
@@ -87,8 +86,14 @@ struct Shared {
     args: Args,
 }
 
+#[allow(dead_code)]
 enum Outcome {
-    Ok { ttft: Duration, e2e: Duration, bytes_in: u64, bytes_out: u64 },
+    Ok {
+        ttft: Duration,
+        e2e: Duration,
+        bytes_in: u64,
+        bytes_out: u64,
+    },
     Err(ErrKind),
 }
 
