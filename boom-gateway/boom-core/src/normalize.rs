@@ -15,15 +15,15 @@ pub fn ensure_role_alternation(messages: &mut Vec<Message>) {
 
         // Only insert separators between user/assistant pairs that would violate
         // the alternation rule. System and Tool roles have special handling.
-        let needs_separator = match (prev_role, curr_role) {
+        let needs_separator = matches!(
+            (prev_role, curr_role),
             (MessageRole::User, MessageRole::User)
-            | (MessageRole::Assistant, MessageRole::Assistant)
-            | (MessageRole::User, MessageRole::Tool)
-            | (MessageRole::Assistant, MessageRole::User)
-            | (MessageRole::Tool, MessageRole::Tool)
-            | (MessageRole::Tool, MessageRole::User) => true,
-            _ => false,
-        };
+                | (MessageRole::Assistant, MessageRole::Assistant)
+                | (MessageRole::User, MessageRole::Tool)
+                | (MessageRole::Assistant, MessageRole::User)
+                | (MessageRole::Tool, MessageRole::Tool)
+                | (MessageRole::Tool, MessageRole::User)
+        );
 
         if needs_separator {
             messages.insert(
@@ -131,10 +131,7 @@ pub fn convert_image_source(source: &serde_json::Value) -> String {
                 .get("media_type")
                 .and_then(|m| m.as_str())
                 .unwrap_or("image/png");
-            let data = source
-                .get("data")
-                .and_then(|d| d.as_str())
-                .unwrap_or("");
+            let data = source.get("data").and_then(|d| d.as_str()).unwrap_or("");
             format!("data:{};base64,{}", media_type, data)
         }
         _ => source.to_string(),
@@ -205,20 +202,16 @@ mod tests {
 
     #[test]
     fn test_convert_tool_choice_none() {
-        let (tc, strip) = convert_tool_choice_for_anthropic(
-            &Some(serde_json::json!({"type": "none"})),
-            None,
-        );
+        let (tc, strip) =
+            convert_tool_choice_for_anthropic(&Some(serde_json::json!({"type": "none"})), None);
         assert!(tc.is_none());
         assert!(strip);
     }
 
     #[test]
     fn test_convert_tool_choice_auto() {
-        let (tc, strip) = convert_tool_choice_for_anthropic(
-            &Some(serde_json::json!({"type": "auto"})),
-            None,
-        );
+        let (tc, strip) =
+            convert_tool_choice_for_anthropic(&Some(serde_json::json!({"type": "auto"})), None);
         assert_eq!(tc.unwrap()["type"], "auto");
         assert!(!strip);
     }
@@ -300,7 +293,11 @@ pub fn host_of_api_base(api_base: &str) -> Option<String> {
     if let Some(rest) = authority.strip_prefix('[') {
         if let Some(end) = rest.find(']') {
             let host = rest[..end].trim();
-            return if host.is_empty() { None } else { Some(host.to_string()) };
+            return if host.is_empty() {
+                None
+            } else {
+                Some(host.to_string())
+            };
         }
     }
     // IPv4 / hostname: strip a trailing `:port` (the last colon). A bare
@@ -323,19 +320,31 @@ mod host_tests {
 
     #[test]
     fn ipv4_with_port_and_path() {
-        assert_eq!(host_of_api_base("http://7.150.7.202:8000/v1"), Some("7.150.7.202".into()));
+        assert_eq!(
+            host_of_api_base("http://7.150.7.202:8000/v1"),
+            Some("7.150.7.202".into())
+        );
     }
     #[test]
     fn ipv6_literal_with_port() {
-        assert_eq!(host_of_api_base("http://[2001:db8::1]:8000/v1"), Some("2001:db8::1".into()));
+        assert_eq!(
+            host_of_api_base("http://[2001:db8::1]:8000/v1"),
+            Some("2001:db8::1".into())
+        );
     }
     #[test]
     fn ipv6_literal_no_port() {
-        assert_eq!(host_of_api_base("http://[2001:db8::1]/v1"), Some("2001:db8::1".into()));
+        assert_eq!(
+            host_of_api_base("http://[2001:db8::1]/v1"),
+            Some("2001:db8::1".into())
+        );
     }
     #[test]
     fn hostname_no_port() {
-        assert_eq!(host_of_api_base("http://worker-0/v1"), Some("worker-0".into()));
+        assert_eq!(
+            host_of_api_base("http://worker-0/v1"),
+            Some("worker-0".into())
+        );
     }
     #[test]
     fn bare_host() {

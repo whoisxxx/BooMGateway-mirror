@@ -1,12 +1,12 @@
+use crate::state::AppState;
+use boom_core::types::AuthIdentity;
+use boom_core::types::Usage;
+use boom_core::{DebugErrorEntry, GatewayError, LogDroppedCounter};
 use sqlx::PgPool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
-use boom_core::types::AuthIdentity;
-use boom_core::types::Usage;
-use boom_core::{DebugErrorEntry, GatewayError, LogDroppedCounter};
-use crate::state::AppState;
 use tokio::sync::mpsc;
 
 /// Channel capacity — sized to absorb ~2s of DB outage at 50K QPS.
@@ -195,14 +195,11 @@ async fn log_writer_task(
 async fn flush_batch(pool: &PgPool, buffer: &mut Vec<RequestLog>, dropped: &AtomicU64) {
     // Drain into an owned Vec — leaves `buffer` empty (capacity preserved)
     // so the next batch doesn't reallocate.
-    let batch: Vec<RequestLog> = buffer.drain(..).collect();
+    let batch: Vec<RequestLog> = std::mem::take(buffer);
     let batch_len = batch.len();
 
     for attempt in 0..=1 {
-        let result = tokio::time::timeout(
-            LOG_INSERT_TIMEOUT,
-            batch_insert(pool, &batch),
-        ).await;
+        let result = tokio::time::timeout(LOG_INSERT_TIMEOUT, batch_insert(pool, &batch)).await;
 
         match result {
             Ok(Ok(rows_affected)) => {
@@ -269,7 +266,7 @@ async fn batch_insert(pool: &PgPool, batch: &[RequestLog]) -> Result<u64, sqlx::
           is_stream, status_code, error_type, error_message, \
           input_tokens, output_tokens, duration_ms, deployment_id, client_ip, ttft_ms, \
           cached_tokens, schedule_policy, kv_hit_blocks, kv_input_blocks, \
-          trie_blocks, trie_max_blocks, request_tokens) "
+          trie_blocks, trie_max_blocks, request_tokens) ",
     );
     qb.push_values(batch.iter(), |mut b, log| {
         b.push_bind(log.request_id.clone())
@@ -318,6 +315,7 @@ pub fn log_request(writer: Option<&LogWriter>, log: RequestLog) {
 
 /// Helper to log an error from a route handler. Call this before returning the error.
 /// `request_body` is an optional serialized request JSON for debug recording.
+#[allow(clippy::too_many_arguments)]
 pub fn log_error(
     state: &AppState,
     identity: &AuthIdentity,
@@ -349,6 +347,7 @@ pub fn log_error(
 
 /// Error logging variant for composite providers that may have completed
 /// successful child calls before the parent request failed.
+#[allow(clippy::too_many_arguments)]
 pub fn log_error_with_usage(
     state: &AppState,
     identity: &AuthIdentity,
@@ -374,7 +373,11 @@ pub fn log_error_with_usage(
         tracing::warn!(
             status_code = error.status_code(),
             error_type = error.error_type(),
-            key = identity.key_alias.as_deref().or(identity.key_name.as_deref()).unwrap_or("-"),
+            key = identity
+                .key_alias
+                .as_deref()
+                .or(identity.key_name.as_deref())
+                .unwrap_or("-"),
             model = model,
             "{:.80}",
             error.to_string()
@@ -396,12 +399,8 @@ pub fn log_error_with_usage(
             status_code: error.status_code(),
             error_type: Some(error.error_type().to_string()),
             error_message: Some(error.to_string()),
-            input_tokens: usage.map(|usage| {
-                usage.prompt_tokens.min(i32::MAX as u32) as i32
-            }),
-            output_tokens: usage.map(|usage| {
-                usage.completion_tokens.min(i32::MAX as u32) as i32
-            }),
+            input_tokens: usage.map(|usage| usage.prompt_tokens.min(i32::MAX as u32) as i32),
+            output_tokens: usage.map(|usage| usage.completion_tokens.min(i32::MAX as u32) as i32),
             duration_ms: Some(start.elapsed().as_millis() as i32),
             ttft_ms: None,
             deployment_id,
@@ -422,7 +421,10 @@ pub fn log_error_with_usage(
     // Debug recording — capture upstream errors with full request body.
     if state.debug_store.is_enabled() && error.should_log_to_db() {
         let error_type = error.error_type();
-        if error_type == "upstream_error" || error_type == "provider_error" || error_type == "timeout" {
+        if error_type == "upstream_error"
+            || error_type == "provider_error"
+            || error_type == "timeout"
+        {
             let (upstream_status, upstream_body) = match error {
                 GatewayError::UpstreamError { status, message } => {
                     (Some(*status), Some(message.clone()))

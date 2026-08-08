@@ -39,7 +39,7 @@ pub fn anthropic_request_to_openai(req: &AnthropicMessagesRequest) -> ChatComple
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
-                reasoning_content: None,
+                    reasoning_content: None,
                 });
             }
         }
@@ -137,8 +137,9 @@ pub fn openai_response_to_anthropic(resp: &ChatCompletionResponse) -> AnthropicM
                     match p {
                         ContentPart::Text { text } => {
                             if !text.is_empty() {
-                                content_blocks
-                                    .push(AnthropicResponseContentBlock::Text { text: text.clone() });
+                                content_blocks.push(AnthropicResponseContentBlock::Text {
+                                    text: text.clone(),
+                                });
                             }
                         }
                         ContentPart::Reasoning { reasoning } => {
@@ -255,8 +256,7 @@ impl AnthropicStreamTranscoder {
             self.content_block_index += 1;
             events.push(AnthropicSseEvent {
                 event: "content_block_stop".to_string(),
-                data: serde_json::json!({ "type": "content_block_stop", "index": idx })
-                    .to_string(),
+                data: serde_json::json!({ "type": "content_block_stop", "index": idx }).to_string(),
             });
         } else if self.text_block_open {
             self.text_block_open = false;
@@ -264,8 +264,7 @@ impl AnthropicStreamTranscoder {
             self.content_block_index += 1;
             events.push(AnthropicSseEvent {
                 event: "content_block_stop".to_string(),
-                data: serde_json::json!({ "type": "content_block_stop", "index": idx })
-                    .to_string(),
+                data: serde_json::json!({ "type": "content_block_stop", "index": idx }).to_string(),
             });
         }
     }
@@ -448,7 +447,7 @@ impl AnthropicStreamTranscoder {
                                 let has_existing = self
                                     .tool_arg_buf
                                     .get(&tc.index)
-                                    .map_or(false, |e| !e.is_empty());
+                                    .is_some_and(|e| !e.is_empty());
                                 if is_vllm_complete && has_existing {
                                     self.tool_arg_buf.insert(tc.index, args.clone());
                                 } else {
@@ -644,11 +643,7 @@ fn convert_user_message(content: &AnthropicContent, messages: &mut Vec<Message>)
                         }
                         tool_results.push((tool_use_id.clone(), text));
                     }
-                    AnthropicContentBlock::Document {
-                        source,
-                        title,
-                        ..
-                    } => {
+                    AnthropicContentBlock::Document { source, title, .. } => {
                         // Extract text from document source if possible.
                         let mut doc_text = String::new();
                         if let Some(t) = title {
@@ -676,7 +671,7 @@ fn convert_user_message(content: &AnthropicContent, messages: &mut Vec<Message>)
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
-                reasoning_content: None,
+                    reasoning_content: None,
                 });
             }
 
@@ -717,7 +712,9 @@ fn convert_assistant_message(content: &AnthropicContent, messages: &mut Vec<Mess
                     AnthropicContentBlock::Text { text, .. } => {
                         text_parts.push(text.clone());
                     }
-                    AnthropicContentBlock::ToolUse { id, name, input, .. } => {
+                    AnthropicContentBlock::ToolUse {
+                        id, name, input, ..
+                    } => {
                         tool_calls.push(ToolCall {
                             id: id.clone(),
                             call_type: "function".to_string(),
@@ -754,9 +751,9 @@ fn convert_assistant_message(content: &AnthropicContent, messages: &mut Vec<Mess
 
             // If we have thinking blocks, use Parts-based content so that
             // Reasoning parts can be preserved for Anthropic round-tripping.
-            let has_thinking = blocks.iter().any(|b| {
-                        matches!(b, AnthropicContentBlock::Thinking { .. })
-                    });
+            let has_thinking = blocks
+                .iter()
+                .any(|b| matches!(b, AnthropicContentBlock::Thinking { .. }));
             let text = text_parts.join("");
 
             if has_thinking {
@@ -764,7 +761,9 @@ fn convert_assistant_message(content: &AnthropicContent, messages: &mut Vec<Mess
                 for block in blocks {
                     match block {
                         AnthropicContentBlock::Thinking { thinking } => {
-                            parts.push(ContentPart::Reasoning { reasoning: thinking.clone() });
+                            parts.push(ContentPart::Reasoning {
+                                reasoning: thinking.clone(),
+                            });
                         }
                         AnthropicContentBlock::Text { text: t, .. } => {
                             if !t.is_empty() {
@@ -789,7 +788,9 @@ fn convert_assistant_message(content: &AnthropicContent, messages: &mut Vec<Mess
                     }
                 }
                 if parts.is_empty() {
-                    parts.push(ContentPart::Text { text: String::new() });
+                    parts.push(ContentPart::Text {
+                        text: String::new(),
+                    });
                 }
                 messages.push(Message {
                     role: MessageRole::Assistant,
@@ -801,7 +802,7 @@ fn convert_assistant_message(content: &AnthropicContent, messages: &mut Vec<Mess
                         Some(tool_calls)
                     },
                     tool_call_id: None,
-                reasoning_content: None,
+                    reasoning_content: None,
                 });
             } else {
                 messages.push(Message {
@@ -814,7 +815,7 @@ fn convert_assistant_message(content: &AnthropicContent, messages: &mut Vec<Mess
                         Some(tool_calls)
                     },
                     tool_call_id: None,
-                reasoning_content: None,
+                    reasoning_content: None,
                 });
             }
         }
@@ -823,12 +824,15 @@ fn convert_assistant_message(content: &AnthropicContent, messages: &mut Vec<Mess
 
 /// Map OpenAI finish_reason to Anthropic stop_reason.
 fn finish_reason_to_stop_reason(reason: &Option<String>) -> Option<String> {
-    reason.as_ref().map(|r| match r.as_str() {
-        "stop" => "end_turn",
-        "tool_calls" => "tool_use",
-        "length" => "max_tokens",
-        other => other,
-    }.to_string())
+    reason.as_ref().map(|r| {
+        match r.as_str() {
+            "stop" => "end_turn",
+            "tool_calls" => "tool_use",
+            "length" => "max_tokens",
+            other => other,
+        }
+        .to_string()
+    })
 }
 
 /// Generate a `msg_` prefixed random ID.
@@ -912,12 +916,14 @@ mod tests {
         let url = format!("{}é-tail.png", "a".repeat(79));
         let content = AnthropicContent::Blocks(vec![AnthropicContentBlock::ToolResult {
             tool_use_id: "tool_123".to_string(),
-            content: Some(AnthropicContent::Blocks(vec![AnthropicContentBlock::Image {
-                source: serde_json::json!({
-                    "type": "url",
-                    "url": url
-                }),
-            }])),
+            content: Some(AnthropicContent::Blocks(vec![
+                AnthropicContentBlock::Image {
+                    source: serde_json::json!({
+                        "type": "url",
+                        "url": url
+                    }),
+                },
+            ])),
             is_error: None,
         }]);
         let mut messages = Vec::new();
@@ -950,7 +956,9 @@ mod tests {
         match &messages[0].content {
             MessageContent::Parts(parts) => {
                 // Should have Reasoning + Text
-                assert!(parts.iter().any(|p| matches!(p, ContentPart::Reasoning { .. })));
+                assert!(parts
+                    .iter()
+                    .any(|p| matches!(p, ContentPart::Reasoning { .. })));
                 assert!(parts.iter().any(|p| matches!(p, ContentPart::Text { .. })));
             }
             _ => panic!("Expected Parts for thinking content"),
@@ -979,7 +987,7 @@ mod tests {
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
-                reasoning_content: None,
+                    reasoning_content: None,
                 },
                 finish_reason: Some("stop".to_string()),
                 logprobs: None,

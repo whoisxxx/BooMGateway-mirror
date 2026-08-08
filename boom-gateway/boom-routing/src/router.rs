@@ -129,7 +129,7 @@ impl Router {
             .load()
             .inner
             .as_ref()
-            .map_or(false, |c| c.model_name() == model)
+            .is_some_and(|c| c.model_name() == model)
     }
 
     /// KV-cache aware routing: resolves candidates then delegates to
@@ -143,7 +143,13 @@ impl Router {
         prefix_bytes: &[u8],
     ) -> Option<Selection> {
         let candidates = self.resolve_candidates(model)?;
-        self.policy.load().inner.select_with_context(model, &candidates, key_hash, input_chars, prefix_bytes)
+        self.policy.load().inner.select_with_context(
+            model,
+            &candidates,
+            key_hash,
+            input_chars,
+            prefix_bytes,
+        )
     }
 
     /// Public access to candidate providers for a model.
@@ -163,10 +169,13 @@ impl Router {
         if candidates.is_empty() {
             return None;
         }
-        self.policy
-            .load()
-            .inner
-            .select_with_context(model, candidates, key_hash, input_chars, prefix_bytes)
+        self.policy.load().inner.select_with_context(
+            model,
+            candidates,
+            key_hash,
+            input_chars,
+            prefix_bytes,
+        )
     }
 
     /// Resolve model name to a list of candidate providers.

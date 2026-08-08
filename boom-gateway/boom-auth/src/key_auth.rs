@@ -1,13 +1,12 @@
 use crate::models::{TeamRow, VerificationToken};
+use async_trait::async_trait;
 use boom_core::provider::{Authenticator, KeyAliasLookup};
 use boom_core::types::AuthIdentity;
 use boom_core::GatewayError;
-use async_trait::async_trait;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::time::Duration;
-use tracing;
 
 /// Database-backed authenticator compatible with litellm's schema.
 ///
@@ -49,7 +48,7 @@ impl DbAuthenticator {
         match &self.master_key {
             Some(master) => {
                 // Constant-time comparison to prevent timing attacks.
-                let equal = raw_key.as_bytes().len() == master.as_bytes().len()
+                let equal = raw_key.len() == master.len()
                     && raw_key
                         .as_bytes()
                         .iter()
@@ -127,7 +126,10 @@ impl DbAuthenticator {
     }
 
     /// Query team's allowed models and alias from boom_team_table.
-    async fn lookup_team(&self, team_id: &str) -> Result<(Vec<String>, Option<String>), GatewayError> {
+    async fn lookup_team(
+        &self,
+        team_id: &str,
+    ) -> Result<(Vec<String>, Option<String>), GatewayError> {
         let db = match &self.db {
             Some(pool) => pool,
             None => return Ok((vec![], None)),
@@ -201,7 +203,9 @@ impl Authenticator for DbAuthenticator {
                 Ok((team_models, team_alias)) => {
                     tracing::debug!(
                         "Resolved team for team {}: models={:?}, alias={:?}",
-                        team_id, team_models, team_alias
+                        team_id,
+                        team_models,
+                        team_alias
                     );
                     identity.team_models = team_models;
                     identity.team_alias = team_alias;
@@ -216,7 +220,8 @@ impl Authenticator for DbAuthenticator {
         if identity.models.contains(&"all-team-models".to_string()) {
             tracing::debug!(
                 "Key {:?}: resolving 'all-team-models' → {:?}",
-                identity.key_name, identity.team_models
+                identity.key_name,
+                identity.team_models
             );
             identity.models = identity.team_models.clone();
         }
@@ -233,7 +238,8 @@ impl Authenticator for DbAuthenticator {
         if identity.models.is_empty() && !identity.team_models.is_empty() {
             tracing::info!(
                 "Key {:?}: key.models empty, falling back to team_models → {:?}",
-                identity.key_name, identity.team_models
+                identity.key_name,
+                identity.team_models
             );
             identity.models = identity.team_models.clone();
         }
@@ -262,14 +268,20 @@ impl Authenticator for DbAuthenticator {
     fn check_model_access(&self, identity: &AuthIdentity, model: &str) -> Result<(), GatewayError> {
         tracing::info!(
             "check_model_access: key={:?}, requested={}, key_models={:?}, team_models={:?}",
-            identity.key_name, model, identity.models, identity.team_models
+            identity.key_name,
+            model,
+            identity.models,
+            identity.team_models
         );
         if identity.can_call_model(model) {
             Ok(())
         } else {
             tracing::warn!(
                 "Model not allowed: key={:?}, requested={}, key_models={:?}, team_models={:?}",
-                identity.key_name, model, identity.models, identity.team_models
+                identity.key_name,
+                model,
+                identity.models,
+                identity.team_models
             );
             Err(GatewayError::ModelNotAllowed(model.to_string()))
         }
@@ -329,7 +341,10 @@ mod tests {
     fn prefix_participates_in_hash() {
         let a = "sk-prod-deadbeefdeadbeefdeadbeefdeadbeef";
         let b = "sk-test-deadbeefdeadbeefdeadbeefdeadbeef";
-        assert_ne!(DbAuthenticator::hash_token(a), DbAuthenticator::hash_token(b));
+        assert_ne!(
+            DbAuthenticator::hash_token(a),
+            DbAuthenticator::hash_token(b)
+        );
     }
 
     /// A litellm-issued key with an embedded `-` (e.g. token_urlsafe output)

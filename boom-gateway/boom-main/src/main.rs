@@ -11,12 +11,15 @@ mod state;
 use axum::routing::{delete, get, post, put};
 use axum::Router;
 use clap::Parser;
-use std::sync::Arc;
 use state::AppState;
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 #[derive(Parser, Debug)]
-#[command(name = "boom-gateway", about = "BooMGateway — High-performance LLM API Gateway")]
+#[command(
+    name = "boom-gateway",
+    about = "BooMGateway — High-performance LLM API Gateway"
+)]
 struct Args {
     /// Path to config YAML file.
     #[arg(short, long, default_value = "config.yaml")]
@@ -88,7 +91,10 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("BooMGateway listening on {}", addr);
 
-    let server = axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>());
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    );
 
     // Ctrl+C: stop server → close DB → exit.
     // tokio::select! drops the losing future, so when shutdown_signal wins,
@@ -138,7 +144,10 @@ fn build_router(state: AppState) -> Router {
         // Unsupported endpoints (return proper errors)
         .route("/v1/embeddings", post(routes::embeddings))
         .route("/v1/audio/speech", post(routes::audio_speech))
-        .route("/v1/audio/transcriptions", post(routes::audio_transcriptions))
+        .route(
+            "/v1/audio/transcriptions",
+            post(routes::audio_transcriptions),
+        )
         .route("/v1/moderations", post(routes::moderations));
 
     // Health check routes (no auth required).
@@ -148,8 +157,7 @@ fn build_router(state: AppState) -> Router {
         .route("/health/ready", get(routes::readiness_check));
 
     // Internal debug routes (no auth, for ops).
-    let internal_routes = Router::new()
-        .route("/internal/kv-index", get(routes::kv_index_status));
+    let internal_routes = Router::new().route("/internal/kv-index", get(routes::kv_index_status));
 
     // Admin routes (require master key).
     let admin_routes = Router::new()
@@ -179,7 +187,10 @@ fn build_router(state: AppState) -> Router {
 
     // Admin command channel: dashboard sends write ops, boom-main handles them.
     let (admin_tx, admin_rx) = tokio::sync::mpsc::channel(64);
-    tokio::spawn(admin_command::admin_command_handler(admin_rx, state.clone()));
+    tokio::spawn(admin_command::admin_command_handler(
+        admin_rx,
+        state.clone(),
+    ));
 
     let dashboard_state = boom_dashboard::DashboardState::new(
         state.dashboard_db_pool.clone(),
@@ -197,7 +208,10 @@ fn build_router(state: AppState) -> Router {
         state.request_rate.clone(),
         state.agent_stats.clone(),
         key_alias_lookup,
-        state.log_writer.clone().map(|w| w as Arc<dyn boom_core::LogDroppedCounter>),
+        state
+            .log_writer
+            .clone()
+            .map(|w| w as Arc<dyn boom_core::LogDroppedCounter>),
     );
     let dashboard_router = boom_dashboard::build_router(dashboard_state);
 
@@ -210,19 +224,23 @@ fn build_router(state: AppState) -> Router {
         .merge(dashboard_router)
         .with_state(state)
         .layer(CorsLayer::permissive())
-        .layer(axum::middleware::from_fn(move |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| {
-            let count = request_count.clone();
-            async move {
-                let path = req.uri().path();
-                if path.starts_with("/v1/") || path.starts_with("/admin/")
-                    || path.starts_with("/chat/") || path.starts_with("/completions")
-                    || path.starts_with("/models")
-                {
-                    count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        .layer(axum::middleware::from_fn(
+            move |req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next| {
+                let count = request_count.clone();
+                async move {
+                    let path = req.uri().path();
+                    if path.starts_with("/v1/")
+                        || path.starts_with("/admin/")
+                        || path.starts_with("/chat/")
+                        || path.starts_with("/completions")
+                        || path.starts_with("/models")
+                    {
+                        count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    next.run(req).await
                 }
-                next.run(req).await
-            }
-        }))
+            },
+        ))
 }
 
 /// Listen for SIGHUP and trigger hot-reload.
@@ -238,15 +256,14 @@ fn spawn_sighup_listener(state: AppState, mut shutdown: tokio::sync::broadcast::
         let reload_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
         let state_clone = state.clone();
         tokio::spawn(async move {
-            let mut stream = match tokio::signal::unix::signal(
-                tokio::signal::unix::SignalKind::hangup(),
-            ) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::error!("Failed to install SIGHUP handler: {}", e);
-                    return;
-                }
-            };
+            let mut stream =
+                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::error!("Failed to install SIGHUP handler: {}", e);
+                        return;
+                    }
+                };
 
             loop {
                 tokio::select! {
@@ -376,7 +393,10 @@ fn spawn_sync_task(state: AppState, mut shutdown: tokio::sync::broadcast::Receiv
                 )
                 .await;
                 if batch_result.is_err() {
-                    tracing::warn!("Rate limit state sync timed out after 30s, {} entries skipped", count);
+                    tracing::warn!(
+                        "Rate limit state sync timed out after 30s, {} entries skipped",
+                        count
+                    );
                 } else {
                     tracing::debug!("Synced {} rate limit counter(s) to DB", count);
                 }
@@ -392,7 +412,10 @@ fn spawn_sync_task(state: AppState, mut shutdown: tokio::sync::broadcast::Receiv
                 )
                 .await;
                 if batch_result.is_err() {
-                    tracing::warn!("Assignment sync timed out after 30s, {} entries skipped", assign_count);
+                    tracing::warn!(
+                        "Assignment sync timed out after 30s, {} entries skipped",
+                        assign_count
+                    );
                 }
             }
 
@@ -507,8 +530,7 @@ fn graceful_restart(port_hint: Option<u16>) -> anyhow::Result<()> {
     );
 
     // Determine port for health probing: --port arg → old process cmdline.
-    let port = port_hint
-        .or_else(|| pids.first().and_then(|&pid| parse_port_from_pid(pid)));
+    let port = port_hint.or_else(|| pids.first().and_then(|&pid| parse_port_from_pid(pid)));
 
     // Send SIGTERM for graceful shutdown.
     for &pid in &pids {

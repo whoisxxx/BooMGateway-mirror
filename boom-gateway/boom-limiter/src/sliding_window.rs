@@ -306,7 +306,11 @@ impl SlidingWindowLimiter {
                     .get(&k)
                     .map(|c| {
                         let elapsed = now.saturating_sub(c.window_start);
-                        if elapsed >= c.window_secs { 0 } else { c.counts }
+                        if elapsed >= c.window_secs {
+                            0
+                        } else {
+                            c.counts
+                        }
                     })
                     .unwrap_or(0);
                 limit.saturating_sub(cur).saturating_sub(weight)
@@ -409,6 +413,7 @@ impl SlidingWindowLimiter {
     /// Pass the SAME `RateLimitKey` used for peek/commit (so window counters
     /// land on the same cache_key), and the matching `QuotaScope` (so
     /// cumulative counters land on the right entity).
+    #[allow(clippy::too_many_arguments)]
     pub fn settle_usage(
         &self,
         key: &RateLimitKey,
@@ -606,8 +611,9 @@ impl SlidingWindowLimiter {
                 continue;
             }
             let counter = entry.value();
-            let remaining =
-                counter.window_secs.saturating_sub(now.saturating_sub(counter.window_start));
+            let remaining = counter
+                .window_secs
+                .saturating_sub(now.saturating_sub(counter.window_start));
             let slot = result.entry(key_hash.to_string()).or_insert((0, 0));
             slot.0 += counter.counts;
             slot.1 = slot.1.max(remaining);
@@ -718,8 +724,14 @@ impl SlidingWindowLimiter {
         self.windows.clear();
         self.cumulative.clear();
         // Best-effort: clear dirty sets too.
-        self.dirty_windows.write().expect("dirty lock poisoned").clear();
-        self.dirty_cumulative.write().expect("dirty lock poisoned").clear();
+        self.dirty_windows
+            .write()
+            .expect("dirty lock poisoned")
+            .clear();
+        self.dirty_cumulative
+            .write()
+            .expect("dirty lock poisoned")
+            .clear();
         count
     }
 
@@ -908,7 +920,8 @@ impl SlidingWindowLimiter {
                 .bind(cst)
                 .bind(ws)
                 .bind(wsec),
-                || sqlx::query(
+                || {
+                    sqlx::query(
                     r#"INSERT INTO boom_rate_limit_state
                        (cache_key, count, tokens, costs_micros, window_start, window_secs, updated_at)
                        VALUES ($1, $2, $3, $4, $5, $6, NOW())"#,
@@ -919,6 +932,7 @@ impl SlidingWindowLimiter {
                 .bind(cst)
                 .bind(ws)
                 .bind(wsec)
+                }
             )?;
         }
 
@@ -931,7 +945,10 @@ impl SlidingWindowLimiter {
 
         // 3. Window dirty-set is informational only (we always sync full
         //    snapshot above) — clear it so it doesn't grow without bound.
-        self.dirty_windows.write().expect("dirty lock poisoned").clear();
+        self.dirty_windows
+            .write()
+            .expect("dirty lock poisoned")
+            .clear();
 
         Ok(())
     }
@@ -1321,10 +1338,7 @@ mod tests {
         };
 
         // Settle $50 → 50_000_000 micros.
-        limiter.settle_usage(
-            &key, &scope, &windows, 0, 0,
-            50_000_000, 0, 0,
-        );
+        limiter.settle_usage(&key, &scope, &windows, 0, 0, 50_000_000, 0, 0);
 
         // Peek: costs dim current=50_000_000, limit_micros=50_000_000 → reject.
         let d = limiter.peek_only(&key, &windows, 1).await;
@@ -1355,26 +1369,21 @@ mod tests {
         assert!(d1.allowed);
         limiter.commit_counts(&key, &windows, 1);
         // Settle 50K tokens + $30.
-        limiter.settle_usage(
-            &key, &scope, &windows,
-            30_000, 20_000,
-            30_000_000, 0, 0,
-        );
+        limiter.settle_usage(&key, &scope, &windows, 30_000, 20_000, 30_000_000, 0, 0);
 
         // Second request: counts=2/10 ok, tokens=50K/100K ok, costs=$30/$50 ok.
         let d2 = limiter.peek_only(&key, &windows, 1).await;
         assert!(d2.allowed);
         limiter.commit_counts(&key, &windows, 1);
         // Settle another 60K tokens (now 110K > 100K).
-        limiter.settle_usage(
-            &key, &scope, &windows,
-            60_000, 0,
-            0, 0, 0,
-        );
+        limiter.settle_usage(&key, &scope, &windows, 60_000, 0, 0, 0, 0);
 
         // Third request: tokens dim current=110K >= 100K → reject.
         let d3 = limiter.peek_only(&key, &windows, 1).await;
-        assert!(!d3.allowed, "tokens dim must reject on independent overflow");
+        assert!(
+            !d3.allowed,
+            "tokens dim must reject on independent overflow"
+        );
     }
 
     #[tokio::test]
@@ -1433,8 +1442,14 @@ mod tests {
 
         let win_key = "commit_counts_only:gpt-4:60";
         let counter = limiter.windows.get(win_key).unwrap();
-        assert_eq!(counter.counts, 2, "counts dim should be 2 after two commits");
-        assert_eq!(counter.tokens, 0, "tokens dim should be 0 (commit_counts doesn't touch it)");
+        assert_eq!(
+            counter.counts, 2,
+            "counts dim should be 2 after two commits"
+        );
+        assert_eq!(
+            counter.tokens, 0,
+            "tokens dim should be 0 (commit_counts doesn't touch it)"
+        );
         assert_eq!(counter.costs_micros, 0);
     }
 
@@ -1455,11 +1470,7 @@ mod tests {
             key_hash: "settle_test".to_string(),
         };
 
-        limiter.settle_usage(
-            &key, &scope, &windows,
-            100, 50,
-            1_500_000, 0, 500_000,
-        );
+        limiter.settle_usage(&key, &scope, &windows, 100, 50, 1_500_000, 0, 500_000);
 
         // Window counter: tokens = 150, costs_micros = 2_000_000.
         let win_key = "settle_test:gpt-4:60";
@@ -1469,11 +1480,26 @@ mod tests {
         assert_eq!(counter.counts, 0, "settle_usage doesn't touch counts dim");
 
         // Cumulative counters.
-        assert_eq!(limiter.peek_cumulative(&scope, CumulativeKind::TotalInputTokens), 100);
-        assert_eq!(limiter.peek_cumulative(&scope, CumulativeKind::TotalOutputTokens), 50);
-        assert_eq!(limiter.peek_cumulative(&scope, CumulativeKind::TotalCost), 2_000_000);
-        assert_eq!(limiter.peek_cumulative(&scope, CumulativeKind::TotalRegularInputCost), 1_500_000);
-        assert_eq!(limiter.peek_cumulative(&scope, CumulativeKind::TotalOutputCost), 500_000);
+        assert_eq!(
+            limiter.peek_cumulative(&scope, CumulativeKind::TotalInputTokens),
+            100
+        );
+        assert_eq!(
+            limiter.peek_cumulative(&scope, CumulativeKind::TotalOutputTokens),
+            50
+        );
+        assert_eq!(
+            limiter.peek_cumulative(&scope, CumulativeKind::TotalCost),
+            2_000_000
+        );
+        assert_eq!(
+            limiter.peek_cumulative(&scope, CumulativeKind::TotalRegularInputCost),
+            1_500_000
+        );
+        assert_eq!(
+            limiter.peek_cumulative(&scope, CumulativeKind::TotalOutputCost),
+            500_000
+        );
     }
 
     #[tokio::test]
@@ -1493,7 +1519,9 @@ mod tests {
         let d = limiter.peek_only(&key, &windows, 1).await;
         assert!(d.allowed);
         assert!(
-            limiter.get_usage(&SlidingWindowLimiter::cache_key(&key, 60)).is_none(),
+            limiter
+                .get_usage(&SlidingWindowLimiter::cache_key(&key, 60))
+                .is_none(),
             "peek_only must not create any counter"
         );
     }
@@ -1679,6 +1707,9 @@ mod tests {
         assert_eq!(snap.total_cost_micros, 1_000_000);
 
         // After reset, peek returns 0.
-        assert_eq!(limiter.peek_cumulative(&scope, CumulativeKind::TotalInputTokens), 0);
+        assert_eq!(
+            limiter.peek_cumulative(&scope, CumulativeKind::TotalInputTokens),
+            0
+        );
     }
 }

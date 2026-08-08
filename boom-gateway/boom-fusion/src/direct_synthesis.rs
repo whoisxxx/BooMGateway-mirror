@@ -74,7 +74,7 @@ impl DirectSynthesisWorkflow {
         let has_tools = original
             .tools
             .as_ref()
-            .map_or(false, |tools| !tools.is_empty());
+            .is_some_and(|tools| !tools.is_empty());
         if has_tools {
             request.messages.push(text_message(
                 MessageRole::User,
@@ -97,7 +97,7 @@ impl DirectSynthesisWorkflow {
         let has_tools = original
             .tools
             .as_ref()
-            .map_or(false, |tools| !tools.is_empty());
+            .is_some_and(|tools| !tools.is_empty());
         let template = if has_tools {
             prompt_text(DIRECT_SYNTHESIS_REFERENCE_CONTEXT_PROMPT)
         } else {
@@ -130,40 +130,37 @@ impl DirectSynthesisWorkflow {
         request
     }
 
-    async fn prepare(&self, context: WorkflowContext) -> Result<PreparedSynthesis, WorkflowFailure> {
+    async fn prepare(
+        &self,
+        context: WorkflowContext,
+    ) -> Result<PreparedSynthesis, WorkflowFailure> {
         let WorkflowContext { request, invoker } = context;
-        let panel_futures = self
-            .config
-            .panel
-            .iter()
-            .map(|instance| {
-                let call = invoker.invoke(
-                    &self.id,
-                    WorkflowRole::Panel,
-                    self.panel_request(&request, instance),
-                );
-                async move {
-                    match self.config.panel_timeout {
-                        Some(timeout) => tokio::time::timeout(timeout, call).await.map_err(|_| {
-                            GatewayError::ProviderError(format!(
-                                "direct_synthesis panel call timed out after {} seconds",
-                                timeout.as_secs()
-                            ))
-                        })?,
-                        None => call.await,
-                    }
+        let panel_futures = self.config.panel.iter().map(|instance| {
+            let call = invoker.invoke(
+                &self.id,
+                WorkflowRole::Panel,
+                self.panel_request(&request, instance),
+            );
+            async move {
+                match self.config.panel_timeout {
+                    Some(timeout) => tokio::time::timeout(timeout, call).await.map_err(|_| {
+                        GatewayError::ProviderError(format!(
+                            "direct_synthesis panel call timed out after {} seconds",
+                            timeout.as_secs()
+                        ))
+                    })?,
+                    None => call.await,
                 }
-            });
+            }
+        });
         let panel_results = join_all(panel_futures).await;
         let mut valid_panels = Vec::with_capacity(self.config.panel.len());
         let mut usage = Usage::default();
 
-        for result in panel_results {
-            if let Ok(invocation) = result {
-                add_usage(&mut usage, &invocation.response.usage);
-                if valid_panel(&invocation.response) {
-                    valid_panels.push(invocation);
-                }
+        for invocation in panel_results.into_iter().flatten() {
+            add_usage(&mut usage, &invocation.response.usage);
+            if valid_panel(&invocation.response) {
+                valid_panels.push(invocation);
             }
         }
 
@@ -288,7 +285,7 @@ fn valid_panel(response: &ChatCompletionResponse) -> bool {
         .message
         .tool_calls
         .as_ref()
-        .map_or(false, |calls| !calls.is_empty())
+        .is_some_and(|calls| !calls.is_empty())
     {
         return true;
     }
@@ -1151,7 +1148,6 @@ mod tests {
                 .and_then(|details| details.cached_tokens),
             Some(3)
         );
-
     }
 
     #[tokio::test]

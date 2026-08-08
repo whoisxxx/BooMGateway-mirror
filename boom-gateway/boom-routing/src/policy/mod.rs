@@ -66,7 +66,14 @@ pub trait SchedulePolicy: Send + Sync {
         _prefix_bytes: &[u8],
     ) -> Option<Selection> {
         self.select(model, candidates, key_hash, input_chars)
-            .map(|provider| Selection { provider, kv_hit_ratio: 0.0, kv_hit_blocks: 0, kv_input_blocks: 0, kv_match_attempted: false, degraded: false })
+            .map(|provider| Selection {
+                provider,
+                kv_hit_ratio: 0.0,
+                kv_hit_blocks: 0,
+                kv_input_blocks: 0,
+                kv_match_attempted: false,
+                degraded: false,
+            })
     }
 
     /// Policy name (for display / config validation).

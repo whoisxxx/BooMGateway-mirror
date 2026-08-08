@@ -149,7 +149,7 @@ impl TimeWindow {
         let mut ts = self.from;
         while ts < self.to {
             v.push(ts);
-            ts = ts + Duration::seconds(self.bucket_secs);
+            ts += Duration::seconds(self.bucket_secs);
         }
         v
     }
@@ -203,18 +203,18 @@ fn build_custom_window(from: DateTime<Utc>, to: DateTime<Utc>) -> TimeWindow {
 /// integer division on the epoch.
 fn pick_bucket_secs(duration_secs: i64) -> i64 {
     const NICE: &[i64] = &[
-        60,      // 1 min
-        300,     // 5 min
-        600,     // 10 min
-        900,     // 15 min
-        1800,    // 30 min
-        3600,    // 1 hour
-        7200,    // 2 hours
-        14400,   // 4 hours
-        21600,   // 6 hours
-        43200,   // 12 hours
-        86400,   // 1 day
-        172800,  // 2 days
+        60,     // 1 min
+        300,    // 5 min
+        600,    // 10 min
+        900,    // 15 min
+        1800,   // 30 min
+        3600,   // 1 hour
+        7200,   // 2 hours
+        14400,  // 4 hours
+        21600,  // 6 hours
+        43200,  // 12 hours
+        86400,  // 1 day
+        172800, // 2 days
     ];
     let target = (duration_secs / 48).max(60);
     for &n in NICE {
@@ -361,6 +361,9 @@ mod tests {
         // An epoch 700s after `from` lands in bucket index 2 (covers [600, 900)).
         assert_eq!(w.bucket_of(1_000_000_700).timestamp(), 1_000_000_600);
         // An epoch before `from` snaps to a negative-index bucket boundary.
-        assert_eq!(w.bucket_of(1_000_000_000 - 100).timestamp(), 1_000_000_000 - 300);
+        assert_eq!(
+            w.bucket_of(1_000_000_000 - 100).timestamp(),
+            1_000_000_000 - 300
+        );
     }
 }

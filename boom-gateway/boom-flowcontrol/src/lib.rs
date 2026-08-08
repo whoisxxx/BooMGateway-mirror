@@ -12,21 +12,12 @@ use std::time::{Duration, Instant};
 // ═══════════════════════════════════════════════════════════
 
 /// Per-deployment flow control configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FlowControlConfig {
     /// Max concurrent in-flight requests. 0 = unlimited.
     pub max_inflight: u32,
     /// Max total input context chars across all in-flight requests. 0 = unlimited.
     pub max_context: u64,
-}
-
-impl Default for FlowControlConfig {
-    fn default() -> Self {
-        Self {
-            max_inflight: 0,
-            max_context: 0,
-        }
-    }
 }
 
 /// Snapshot of a single deployment's flow control state.
@@ -266,11 +257,7 @@ impl FlowControlSlot {
 
     /// Scan a queue and dispatch the first waiting request that fits.
     /// Also cleans up cancelled requests (grant sender already dropped).
-    fn try_dispatch_fitting(
-        inner: &mut SlotInner,
-        used_ctx: u64,
-        vip: bool,
-    ) -> bool {
+    fn try_dispatch_fitting(inner: &mut SlotInner, used_ctx: u64, vip: bool) -> bool {
         let queue = if vip {
             &mut inner.vip_queue
         } else {
@@ -333,11 +320,7 @@ impl FlowControlSlot {
             ahead
         } else {
             // All VIP waiting always go first.
-            let vip_waiting = inner
-                .vip_queue
-                .iter()
-                .filter(|r| !r.dispatched)
-                .count();
+            let vip_waiting = inner.vip_queue.iter().filter(|r| !r.dispatched).count();
             let mut ahead = vip_waiting;
             for req in &inner.normal_queue {
                 if req.id == request_id {
@@ -409,6 +392,7 @@ impl FlowController {
         self.slots.retain(|id, _| active_ids.contains(id));
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn acquire(
         &self,
         deployment_id: &str,
@@ -467,7 +451,7 @@ impl FlowController {
         if let Some(ref kh) = key_hash {
             self.key_index
                 .entry(kh.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(KeyRequestRef {
                     deployment_id: deployment_id.to_string(),
                     request_id,
@@ -716,7 +700,9 @@ impl FlowController {
         if !stale_refs.is_empty() {
             if let Some(mut entries) = self.key_index.get_mut(key_hash) {
                 for kr in &stale_refs {
-                    entries.retain(|r| !(r.deployment_id == kr.deployment_id && r.request_id == kr.request_id));
+                    entries.retain(|r| {
+                        !(r.deployment_id == kr.deployment_id && r.request_id == kr.request_id)
+                    });
                 }
                 if entries.is_empty() {
                     drop(entries);
@@ -836,10 +822,7 @@ impl<S> FlowControlledStream<S> {
     }
 
     pub fn passthrough(inner: S) -> Self {
-        Self {
-            inner,
-            guard: None,
-        }
+        Self { inner, guard: None }
     }
 }
 
@@ -862,10 +845,13 @@ mod tests {
 
     fn make_fc(max_inflight: u32) -> FlowController {
         let fc = FlowController::new();
-        fc.ensure_slot("dep1", &FlowControlConfig {
-            max_inflight,
-            max_context: 0,
-        });
+        fc.ensure_slot(
+            "dep1",
+            &FlowControlConfig {
+                max_inflight,
+                max_context: 0,
+            },
+        );
         fc
     }
 
@@ -874,12 +860,16 @@ mod tests {
         // Single request: enqueues, dispatches immediately (max_inflight >= 1),
         // grant fires, guard drops cleanly.
         let fc = make_fc(1);
-        let g = fc.acquire("dep1", 100, Duration::from_secs(5), false, None, None, None).await;
+        let g = fc
+            .acquire("dep1", 100, Duration::from_secs(5), false, None, None, None)
+            .await;
         assert!(g.is_ok(), "first acquire should succeed immediately");
         drop(g.unwrap());
 
         // After drop, slot is free again — second acquire works.
-        let g2 = fc.acquire("dep1", 100, Duration::from_secs(5), false, None, None, None).await;
+        let g2 = fc
+            .acquire("dep1", 100, Duration::from_secs(5), false, None, None, None)
+            .await;
         assert!(g2.is_ok());
     }
 
@@ -887,15 +877,39 @@ mod tests {
     async fn test_acquire_timeout() {
         // max_inflight=1, first request holds the slot, second times out.
         let fc = make_fc(1);
-        let _g1 = fc.acquire("dep1", 100, Duration::from_secs(60), false, None, None, None).await.unwrap();
+        let _g1 = fc
+            .acquire(
+                "dep1",
+                100,
+                Duration::from_secs(60),
+                false,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         // Second request — very short timeout, should fail.
-        let r = fc.acquire("dep1", 100, Duration::from_millis(50), false, None, None, None).await;
+        let r = fc
+            .acquire(
+                "dep1",
+                100,
+                Duration::from_millis(50),
+                false,
+                None,
+                None,
+                None,
+            )
+            .await;
         assert!(matches!(r, Err(FlowControlError::Timeout { .. })));
 
         // Queue should be empty after timeout (request was removed).
         let stats = fc.get_stats();
-        assert_eq!(stats[0].waiters, 0, "timed-out request must be removed from queue");
+        assert_eq!(
+            stats[0].waiters, 0,
+            "timed-out request must be removed from queue"
+        );
     }
 
     #[tokio::test]
@@ -909,10 +923,29 @@ mod tests {
         // future is dropped on client disconnect.
         let fc = make_fc(1);
         // Hold the slot with a long-lived guard.
-        let _g1 = fc.acquire("dep1", 100, Duration::from_secs(60), false, None, None, None).await.unwrap();
+        let _g1 = fc
+            .acquire(
+                "dep1",
+                100,
+                Duration::from_secs(60),
+                false,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         // Create the acquire future, owned in an Option, pinned on the heap.
-        let mut acquire_fut = Some(Box::pin(fc.acquire("dep1", 100, Duration::from_secs(60), false, None, None, None)));
+        let mut acquire_fut = Some(Box::pin(fc.acquire(
+            "dep1",
+            100,
+            Duration::from_secs(60),
+            false,
+            None,
+            None,
+            None,
+        )));
 
         // Poll once to ensure the request is enqueued.
         {
@@ -933,23 +966,48 @@ mod tests {
 
         // The queued request must be gone.
         let stats = fc.get_stats();
-        assert_eq!(stats[0].waiters, 0, "dropped future must remove queued request (principle 2)");
+        assert_eq!(
+            stats[0].waiters, 0,
+            "dropped future must remove queued request (principle 2)"
+        );
     }
 
     #[tokio::test]
     async fn test_vip_inserts_before_normal() {
         // VIP queue is dispatched entirely before normal queue.
         let fc = FlowController::new();
-        fc.ensure_slot("dep1", &FlowControlConfig {
-            max_inflight: 1,
-            max_context: 0,
-        });
+        fc.ensure_slot(
+            "dep1",
+            &FlowControlConfig {
+                max_inflight: 1,
+                max_context: 0,
+            },
+        );
 
         // Hold the slot.
-        let g1 = fc.acquire("dep1", 100, Duration::from_secs(60), false, None, None, None).await.unwrap();
+        let g1 = fc
+            .acquire(
+                "dep1",
+                100,
+                Duration::from_secs(60),
+                false,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
 
         // Enqueue a normal request first, then a VIP request.
-        let normal_fut = fc.acquire("dep1", 100, Duration::from_secs(60), false, None, None, None);
+        let normal_fut = fc.acquire(
+            "dep1",
+            100,
+            Duration::from_secs(60),
+            false,
+            None,
+            None,
+            None,
+        );
         let vip_fut = fc.acquire("dep1", 100, Duration::from_secs(60), true, None, None, None);
         tokio::pin!(normal_fut);
         tokio::pin!(vip_fut);
@@ -983,7 +1041,11 @@ mod tests {
             let _ = std::pin::Pin::new(&mut vip_fut).poll(&mut cx);
         }
 
-        drop(normal_fut);
-        drop(vip_fut);
+        // Suppress drop_non_drop: these are intentional cancels.
+        #[allow(clippy::drop_non_drop)]
+        {
+            drop(normal_fut);
+            drop(vip_fut);
+        }
     }
 }

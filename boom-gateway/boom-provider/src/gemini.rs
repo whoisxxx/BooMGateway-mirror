@@ -1,8 +1,8 @@
 use crate::{generate_response_id, now_timestamp};
+use async_trait::async_trait;
 use boom_core::provider::Provider;
 use boom_core::types::*;
 use boom_core::GatewayError;
-use async_trait::async_trait;
 use futures::stream::StreamExt;
 use reqwest::Client;
 use tokio_stream::wrappers::ReceiverStream;
@@ -20,7 +20,13 @@ pub struct GeminiProvider {
 }
 
 impl GeminiProvider {
-    pub fn new(client: Client, api_key: Option<String>, model: &str, deployment_id: Option<String>, client_type_header: bool) -> Self {
+    pub fn new(
+        client: Client,
+        api_key: Option<String>,
+        model: &str,
+        deployment_id: Option<String>,
+        client_type_header: bool,
+    ) -> Self {
         Self {
             client,
             api_key,
@@ -168,7 +174,11 @@ impl GeminiProvider {
                 .iter()
                 .filter_map(|p| match p {
                     ContentPart::Text { text } => {
-                        if text.is_empty() { None } else { Some(serde_json::json!({"text": text})) }
+                        if text.is_empty() {
+                            None
+                        } else {
+                            Some(serde_json::json!({"text": text}))
+                        }
                     }
                     ContentPart::ImageUrl { image_url } => {
                         let url = &image_url.url;
@@ -192,7 +202,11 @@ impl GeminiProvider {
                     }
                     ContentPart::Reasoning { reasoning } => {
                         // Gemini has no reasoning block — emit as text.
-                        if reasoning.is_empty() { None } else { Some(serde_json::json!({"text": reasoning})) }
+                        if reasoning.is_empty() {
+                            None
+                        } else {
+                            Some(serde_json::json!({"text": reasoning}))
+                        }
                     }
                 })
                 .collect(),
@@ -200,6 +214,7 @@ impl GeminiProvider {
         }
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn from_gemini_response(
         &self,
         resp: serde_json::Value,
@@ -220,7 +235,11 @@ impl GeminiProvider {
                     text_parts.push(text.to_string());
                 }
                 if let Some(fc) = part.get("functionCall") {
-                    let name = fc.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                    let name = fc
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let args = fc.get("args").cloned().unwrap_or(serde_json::json!({}));
                     let arguments = serde_json::to_string(&args).unwrap_or_default();
                     let id = format!("call_{}", uuid::Uuid::new_v4().simple());
@@ -302,7 +321,10 @@ impl GeminiProvider {
 
 #[async_trait]
 impl Provider for GeminiProvider {
-    async fn chat(&self, req: ChatCompletionRequest) -> Result<ChatCompletionResponse, GatewayError> {
+    async fn chat(
+        &self,
+        req: ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse, GatewayError> {
         let requested_model = req.model.clone();
         let body = self.to_gemini_request(&req);
         let url = format!(
@@ -317,14 +339,10 @@ impl Provider for GeminiProvider {
         // Non-streaming: upstream sends no data until the entire response is ready.
         // Uses the reqwest Client timeout from deployment config (`create_provider`), not a separate 600s cap.
 
-        let resp = builder
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Gemini request failed: {}", e);
-                GatewayError::ProviderError("Upstream provider unavailable".to_string())
-            })?;
+        let resp = builder.json(&body).send().await.map_err(|e| {
+            tracing::error!("Gemini request failed: {}", e);
+            GatewayError::ProviderError("Upstream provider unavailable".to_string())
+        })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -335,13 +353,10 @@ impl Provider for GeminiProvider {
             });
         }
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to parse Gemini response: {}", e);
-                GatewayError::ProviderError("Failed to process upstream response".to_string())
-            })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
+            tracing::error!("Failed to parse Gemini response: {}", e);
+            GatewayError::ProviderError("Failed to process upstream response".to_string())
+        })?;
 
         Ok(self.from_gemini_response(body, &requested_model))
     }
@@ -359,14 +374,10 @@ impl Provider for GeminiProvider {
             builder = builder.query(&[("key", key)]);
         }
 
-        let resp = builder
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Gemini stream request failed: {}", e);
-                GatewayError::ProviderError("Upstream provider unavailable".to_string())
-            })?;
+        let resp = builder.json(&body).send().await.map_err(|e| {
+            tracing::error!("Gemini stream request failed: {}", e);
+            GatewayError::ProviderError("Upstream provider unavailable".to_string())
+        })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -404,8 +415,16 @@ impl Provider for GeminiProvider {
                                         // Check for usage metadata (typically in the last chunk).
                                         let usage_meta = gemini_resp.get("usageMetadata");
                                         let stream_usage = usage_meta.map(|u| {
-                                            let pt = u.get("promptTokenCount").and_then(|t| t.as_u64()).unwrap_or(0) as i32;
-                                            let ct = u.get("candidatesTokenCount").and_then(|t| t.as_u64()).unwrap_or(0) as i32;
+                                            let pt = u
+                                                .get("promptTokenCount")
+                                                .and_then(|t| t.as_u64())
+                                                .unwrap_or(0)
+                                                as i32;
+                                            let ct = u
+                                                .get("candidatesTokenCount")
+                                                .and_then(|t| t.as_u64())
+                                                .unwrap_or(0)
+                                                as i32;
                                             StreamUsage {
                                                 prompt_tokens: Some(pt),
                                                 completion_tokens: Some(ct),
@@ -439,12 +458,15 @@ impl Provider for GeminiProvider {
                                         if let Some(parts) = parts {
                                             for part in parts {
                                                 // Text content.
-                                                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                                if let Some(text) =
+                                                    part.get("text").and_then(|t| t.as_str())
+                                                {
                                                     if !text.is_empty() {
                                                         has_content = true;
                                                         let chunk = ChatStreamChunk {
                                                             id: response_id.clone(),
-                                                            object: "chat.completion.chunk".to_string(),
+                                                            object: "chat.completion.chunk"
+                                                                .to_string(),
                                                             created,
                                                             model: model.clone(),
                                                             choices: vec![StreamChoice {
@@ -468,10 +490,21 @@ impl Provider for GeminiProvider {
                                                 // Function call in streaming.
                                                 if let Some(fc) = part.get("functionCall") {
                                                     has_content = true;
-                                                    let name = fc.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-                                                    let args = fc.get("args").cloned().unwrap_or(serde_json::json!({}));
-                                                    let arguments = serde_json::to_string(&args).unwrap_or_default();
-                                                    let id = format!("call_{}", uuid::Uuid::new_v4().simple());
+                                                    let name = fc
+                                                        .get("name")
+                                                        .and_then(|n| n.as_str())
+                                                        .unwrap_or("")
+                                                        .to_string();
+                                                    let args = fc
+                                                        .get("args")
+                                                        .cloned()
+                                                        .unwrap_or(serde_json::json!({}));
+                                                    let arguments = serde_json::to_string(&args)
+                                                        .unwrap_or_default();
+                                                    let id = format!(
+                                                        "call_{}",
+                                                        uuid::Uuid::new_v4().simple()
+                                                    );
                                                     let idx = tool_call_index;
                                                     tool_call_index += 1;
                                                     let chunk = ChatStreamChunk {
@@ -484,15 +517,23 @@ impl Provider for GeminiProvider {
                                                             delta: StreamDelta {
                                                                 role: None,
                                                                 content: None,
-                                                                tool_calls: Some(vec![ToolCallDelta {
-                                                                    index: idx,
-                                                                    id: Some(id),
-                                                                    call_type: Some("function".to_string()),
-                                                                    function: Some(FunctionCallDelta {
-                                                                        name: Some(name),
-                                                                        arguments: Some(arguments),
-                                                                    }),
-                                                                }]),
+                                                                tool_calls: Some(vec![
+                                                                    ToolCallDelta {
+                                                                        index: idx,
+                                                                        id: Some(id),
+                                                                        call_type: Some(
+                                                                            "function".to_string(),
+                                                                        ),
+                                                                        function: Some(
+                                                                            FunctionCallDelta {
+                                                                                name: Some(name),
+                                                                                arguments: Some(
+                                                                                    arguments,
+                                                                                ),
+                                                                            },
+                                                                        ),
+                                                                    },
+                                                                ]),
                                                                 reasoning_content: None,
                                                             },
                                                             finish_reason: None,
@@ -509,7 +550,8 @@ impl Provider for GeminiProvider {
 
                                         // Emit finish chunk if we have a finish reason or usage.
                                         if finish_reason.is_some() || stream_usage.is_some() {
-                                            let finish = finish_reason.unwrap_or_else(|| "stop".to_string());
+                                            let finish =
+                                                finish_reason.unwrap_or_else(|| "stop".to_string());
                                             let chunk = ChatStreamChunk {
                                                 id: response_id.clone(),
                                                 object: "chat.completion.chunk".to_string(),

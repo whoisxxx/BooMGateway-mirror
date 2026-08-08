@@ -55,11 +55,9 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     .execute(&mut *conn)
     .await;
     // Add auto_disabled column (no-op if already present).
-    let _ = sqlx::query(
-        boom_routing::migrations::migration_add_auto_disabled(),
-    )
-    .execute(&mut *conn)
-    .await;
+    let _ = sqlx::query(boom_routing::migrations::migration_add_auto_disabled())
+        .execute(&mut *conn)
+        .await;
     // Add flow control columns (no-op if already present).
     let _ = sqlx::query(
         r#"ALTER TABLE boom_model_deployment ADD COLUMN IF NOT EXISTS max_inflight_queue_len INTEGER"#,
@@ -123,11 +121,9 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     // on datanode"). Idempotent — REPLICATION is a no-op if already set.
     // Errors are warned (not fatal): vanilla Postgres / single-node
     // openGauss don't support DISTRIBUTE BY syntax.
-    match sqlx::query(
-        "ALTER TABLE boom_rate_limit_cumulative DISTRIBUTE BY REPLICATION",
-    )
-    .execute(&mut *conn)
-    .await
+    match sqlx::query("ALTER TABLE boom_rate_limit_cumulative DISTRIBUTE BY REPLICATION")
+        .execute(&mut *conn)
+        .await
     {
         Ok(_) => tracing::info!("Migration 6c: ALTER DISTRIBUTE BY REPLICATION ok"),
         Err(e) => tracing::warn!(
@@ -177,11 +173,10 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     .await;
     // Idempotent ALTER: add tag column for user-supplied key classification
     // (no-op if already present). Forward-compatible — old rows have NULL.
-    let _ = sqlx::query(
-        r#"ALTER TABLE "boom_verification_token" ADD COLUMN IF NOT EXISTS tag TEXT"#,
-    )
-    .execute(&mut *conn)
-    .await;
+    let _ =
+        sqlx::query(r#"ALTER TABLE "boom_verification_token" ADD COLUMN IF NOT EXISTS tag TEXT"#)
+            .execute(&mut *conn)
+            .await;
     tracing::info!("Migration 9/9: done");
 
     // Connection returns to pool on drop.
@@ -197,10 +192,7 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
 /// (which contain semicolons) are sent to the server as one unit instead of
 /// being split client-side. The previous `split(';')` approach broke dollar
 /// quoting — `DO $$ BEGIN ... ; ... END $$` got cut into unterminated pieces.
-async fn run_ddl_on_conn(
-    conn: &mut sqlx::PgConnection,
-    ddl: &str,
-) -> Result<(), sqlx::Error> {
+async fn run_ddl_on_conn(conn: &mut sqlx::PgConnection, ddl: &str) -> Result<(), sqlx::Error> {
     sqlx::raw_sql(ddl).execute(&mut *conn).await?;
     Ok(())
 }

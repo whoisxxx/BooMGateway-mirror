@@ -82,7 +82,10 @@ impl<S, F> Drop for PromptLogStream<S, F> {
             }
 
             if let Err(e) = self.sender.send(entry) {
-                tracing::debug!("Prompt log channel closed on stream drop: {}", e.0.request_id);
+                tracing::debug!(
+                    "Prompt log channel closed on stream drop: {}",
+                    e.0.request_id
+                );
             }
         }
     }

@@ -1,6 +1,6 @@
 use axum::extract::Path;
-use axum::http::StatusCode;
 use axum::http::header;
+use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 
 const INDEX_HTML: &str = include_str!("frontend/index.html");
@@ -54,23 +54,25 @@ fn content_type_for(bytes: &[u8]) -> &'static str {
 
 /// Redirect `/` to `/dashboard`.
 pub async fn redirect_root() -> Response {
-    (
-        StatusCode::FOUND,
-        [(header::LOCATION, "/dashboard")],
-    )
-        .into_response()
+    (StatusCode::FOUND, [(header::LOCATION, "/dashboard")]).into_response()
 }
 
 pub async fn index() -> Response {
     #[cfg(feature = "debug-tools")]
-    let body = INDEX_HTML.replace(r#"nav-admin-debug" style="display:none"#, r#"nav-admin-debug""#);
+    let body = INDEX_HTML.replace(
+        r#"nav-admin-debug" style="display:none"#,
+        r#"nav-admin-debug""#,
+    );
     #[cfg(not(feature = "debug-tools"))]
     let body = INDEX_HTML.to_string();
     (
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8"),
-         (header::CACHE_CONTROL, "no-cache")],
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
         body,
-    ).into_response()
+    )
+        .into_response()
 }
 
 pub async fn style_css() -> Response {
@@ -90,8 +92,13 @@ pub async fn app_js() -> Response {
     #[cfg(not(feature = "debug-tools"))]
     let body = format!("window.__KVC_DEBUG=false;\n{}", APP_JS);
     (
-        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8"),
-         (header::CACHE_CONTROL, "no-cache")],
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
         body,
     )
         .into_response()
@@ -99,7 +106,10 @@ pub async fn app_js() -> Response {
 
 pub async fn i18n_js() -> Response {
     (
-        [(header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
         I18N_JS,
     )
         .into_response()

@@ -177,8 +177,7 @@ pub trait KvIndexBackend: Send + Sync {
 
     /// Prune approximate-mode blocks older than `ttl` (TTL eviction, complements
     /// LRU). Default no-op.
-    fn prune_expired(&self, _ttl: std::time::Duration) {
-    }
+    fn prune_expired(&self, _ttl: std::time::Duration) {}
 
     /// Return all model names currently tracked.
     fn model_names(&self) -> HashSet<String>;

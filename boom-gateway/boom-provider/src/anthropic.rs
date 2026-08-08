@@ -1,9 +1,9 @@
 use crate::{generate_response_id, now_timestamp};
+use async_trait::async_trait;
 use boom_core::normalize;
 use boom_core::provider::Provider;
 use boom_core::types::*;
 use boom_core::GatewayError;
-use async_trait::async_trait;
 use futures::stream::StreamExt;
 use reqwest::Client;
 use tokio_stream::wrappers::ReceiverStream;
@@ -38,8 +38,7 @@ impl AnthropicProvider {
         Self {
             client,
             api_key,
-            base_url: api_base
-                .unwrap_or_else(|| "https://api.anthropic.com/v1".to_string()),
+            base_url: api_base.unwrap_or_else(|| "https://api.anthropic.com/v1".to_string()),
             model: model.to_string(),
             deployment_id,
             kv_worker_id,
@@ -100,18 +99,15 @@ impl AnthropicProvider {
                         }
                         MessageContent::Parts(parts) => {
                             for p in parts {
-                                match p {
-                                    ContentPart::Text { text } => {
-                                        let mut block = serde_json::json!({
-                                            "type": "text",
-                                            "text": text,
-                                        });
-                                        if let Some(cc) = req.extra.get("system_cache_control") {
-                                            block["cache_control"] = cc.clone();
-                                        }
-                                        system_blocks.push(block);
+                                if let ContentPart::Text { text } = p {
+                                    let mut block = serde_json::json!({
+                                        "type": "text",
+                                        "text": text,
+                                    });
+                                    if let Some(cc) = req.extra.get("system_cache_control") {
+                                        block["cache_control"] = cc.clone();
                                     }
-                                    _ => {}
+                                    system_blocks.push(block);
                                 }
                             }
                         }
@@ -124,8 +120,7 @@ impl AnthropicProvider {
                     // Text and reasoning content.
                     match &msg.content {
                         MessageContent::Text(t) if !t.is_empty() => {
-                            content_blocks
-                                .push(serde_json::json!({"type": "text", "text": t}));
+                            content_blocks.push(serde_json::json!({"type": "text", "text": t}));
                         }
                         MessageContent::Parts(parts) => {
                             for p in parts {
@@ -314,7 +309,8 @@ impl AnthropicProvider {
                         "input_schema": schema,
                     }));
                     // Force the model to use this tool.
-                    body["tool_choice"] = serde_json::json!({"type": "tool", "name": "output_json"});
+                    body["tool_choice"] =
+                        serde_json::json!({"type": "tool", "name": "output_json"});
                 }
             }
 
@@ -343,7 +339,10 @@ impl AnthropicProvider {
         }
         // Forward user (litellm does this too).
         if let Some(ref user) = req.user {
-            body["metadata"] = body.get("metadata").cloned().unwrap_or(serde_json::json!({}));
+            body["metadata"] = body
+                .get("metadata")
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
             if let Some(meta) = body.get_mut("metadata").and_then(|m| m.as_object_mut()) {
                 meta.insert("user_id".to_string(), serde_json::json!(user));
             }
@@ -353,6 +352,7 @@ impl AnthropicProvider {
     }
 
     /// Convert Anthropic's response to OpenAI format.
+    #[allow(clippy::wrong_self_convention)]
     fn from_anthropic_response(
         &self,
         resp: serde_json::Value,
@@ -367,7 +367,9 @@ impl AnthropicProvider {
                 match block_type {
                     "text" => {
                         if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                            content_parts.push(ContentPart::Text { text: text.to_string() });
+                            content_parts.push(ContentPart::Text {
+                                text: text.to_string(),
+                            });
                         }
                     }
                     "thinking" => {
@@ -447,7 +449,10 @@ impl AnthropicProvider {
 
         // Use Parts-based content when we have reasoning blocks,
         // otherwise use simple Text for backward compatibility.
-        let message_content = if content_parts.iter().any(|p| matches!(p, ContentPart::Reasoning { .. })) {
+        let message_content = if content_parts
+            .iter()
+            .any(|p| matches!(p, ContentPart::Reasoning { .. }))
+        {
             if content_parts.is_empty() {
                 MessageContent::Text(String::new())
             } else {
@@ -519,7 +524,10 @@ impl AnthropicProvider {
 
 #[async_trait]
 impl Provider for AnthropicProvider {
-    async fn chat(&self, req: ChatCompletionRequest) -> Result<ChatCompletionResponse, GatewayError> {
+    async fn chat(
+        &self,
+        req: ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse, GatewayError> {
         let requested_model = req.model.clone();
         let body = self.to_anthropic_request(&req);
         let url = format!("{}/messages", self.base_url.trim_end_matches('/'));
@@ -538,14 +546,10 @@ impl Provider for AnthropicProvider {
         // Non-streaming: upstream sends no data until the entire response is ready.
         // Uses the reqwest Client timeout from deployment config (`create_provider`), not a separate 600s cap.
 
-        let resp = builder
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Anthropic request failed: {}", e);
-                GatewayError::ProviderError("Upstream provider unavailable".to_string())
-            })?;
+        let resp = builder.json(&body).send().await.map_err(|e| {
+            tracing::error!("Anthropic request failed: {}", e);
+            GatewayError::ProviderError("Upstream provider unavailable".to_string())
+        })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -556,13 +560,10 @@ impl Provider for AnthropicProvider {
             });
         }
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to parse Anthropic response: {}", e);
-                GatewayError::ProviderError("Failed to process upstream response".to_string())
-            })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
+            tracing::error!("Failed to parse Anthropic response: {}", e);
+            GatewayError::ProviderError("Failed to process upstream response".to_string())
+        })?;
 
         Ok(self.from_anthropic_response(body, &requested_model))
     }
@@ -586,14 +587,10 @@ impl Provider for AnthropicProvider {
             builder = builder.header("anthropic-beta", betas.join(","));
         }
 
-        let resp = builder
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Anthropic stream request failed: {}", e);
-                GatewayError::ProviderError("Upstream provider unavailable".to_string())
-            })?;
+        let resp = builder.json(&body).send().await.map_err(|e| {
+            tracing::error!("Anthropic stream request failed: {}", e);
+            GatewayError::ProviderError("Upstream provider unavailable".to_string())
+        })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -615,7 +612,8 @@ impl Provider for AnthropicProvider {
 
             // Track open content blocks by index for proper tool_use handling.
             // Maps Anthropic content_block index → OpenAI tool_call index (0-based).
-            let mut tool_index_map: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+            let mut tool_index_map: std::collections::HashMap<u32, u32> =
+                std::collections::HashMap::new();
             let mut next_tool_index: u32 = 0;
 
             while let Some(chunk_result) = stream.next().await {
@@ -649,14 +647,30 @@ impl Provider for AnthropicProvider {
 
                             match event_type.as_str() {
                                 "content_block_start" => {
-                                    let idx = data.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as u32;
-                                    let block = data.get("content_block").unwrap_or(&serde_json::Value::Null);
-                                    let btype = block.get("type").and_then(|t| t.as_str()).unwrap_or("text").to_string();
+                                    let idx =
+                                        data.get("index").and_then(|i| i.as_u64()).unwrap_or(0)
+                                            as u32;
+                                    let block = data
+                                        .get("content_block")
+                                        .unwrap_or(&serde_json::Value::Null);
+                                    let btype = block
+                                        .get("type")
+                                        .and_then(|t| t.as_str())
+                                        .unwrap_or("text")
+                                        .to_string();
 
                                     match btype.as_str() {
                                         "tool_use" => {
-                                            let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                                            let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                                            let id = block
+                                                .get("id")
+                                                .and_then(|i| i.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            let name = block
+                                                .get("name")
+                                                .and_then(|n| n.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
                                             let openai_idx = next_tool_index;
                                             tool_index_map.insert(idx, openai_idx);
                                             next_tool_index += 1;
@@ -701,13 +715,20 @@ impl Provider for AnthropicProvider {
                                     }
                                 }
                                 "content_block_delta" => {
-                                    let idx = data.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as u32;
-                                    let delta = data.get("delta").unwrap_or(&serde_json::Value::Null);
-                                    let delta_type = delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                    let idx =
+                                        data.get("index").and_then(|i| i.as_u64()).unwrap_or(0)
+                                            as u32;
+                                    let delta =
+                                        data.get("delta").unwrap_or(&serde_json::Value::Null);
+                                    let delta_type =
+                                        delta.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
                                     match delta_type {
                                         "text_delta" => {
-                                            let text = delta.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                                            let text = delta
+                                                .get("text")
+                                                .and_then(|t| t.as_str())
+                                                .unwrap_or("");
                                             if !text.is_empty() {
                                                 let chunk = ChatStreamChunk {
                                                     id: response_id.clone(),
@@ -734,8 +755,12 @@ impl Provider for AnthropicProvider {
                                         }
                                         "input_json_delta" => {
                                             // Tool argument fragment.
-                                            let partial = delta.get("partial_json").and_then(|p| p.as_str()).unwrap_or("");
-                                            let openai_idx = tool_index_map.get(&idx).copied().unwrap_or(idx);
+                                            let partial = delta
+                                                .get("partial_json")
+                                                .and_then(|p| p.as_str())
+                                                .unwrap_or("");
+                                            let openai_idx =
+                                                tool_index_map.get(&idx).copied().unwrap_or(idx);
                                             let chunk = ChatStreamChunk {
                                                 id: response_id.clone(),
                                                 object: "chat.completion.chunk".to_string(),
@@ -752,7 +777,9 @@ impl Provider for AnthropicProvider {
                                                             call_type: None,
                                                             function: Some(FunctionCallDelta {
                                                                 name: None,
-                                                                arguments: Some(partial.to_string()),
+                                                                arguments: Some(
+                                                                    partial.to_string(),
+                                                                ),
                                                             }),
                                                         }]),
                                                         reasoning_content: None,
@@ -768,7 +795,10 @@ impl Provider for AnthropicProvider {
                                         }
                                         "thinking_delta" => {
                                             // Extended thinking content.
-                                            let thinking = delta.get("thinking").and_then(|t| t.as_str()).unwrap_or("");
+                                            let thinking = delta
+                                                .get("thinking")
+                                                .and_then(|t| t.as_str())
+                                                .unwrap_or("");
                                             if !thinking.is_empty() {
                                                 let chunk = ChatStreamChunk {
                                                     id: response_id.clone(),
@@ -781,7 +811,9 @@ impl Provider for AnthropicProvider {
                                                             role: None,
                                                             content: None,
                                                             tool_calls: None,
-                                                            reasoning_content: Some(thinking.to_string()),
+                                                            reasoning_content: Some(
+                                                                thinking.to_string(),
+                                                            ),
                                                         },
                                                         finish_reason: None,
                                                     }],
@@ -813,7 +845,8 @@ impl Provider for AnthropicProvider {
                                     let output_tokens = usage_data
                                         .and_then(|u| u.get("output_tokens"))
                                         .and_then(|t| t.as_u64())
-                                        .unwrap_or(0) as i32;
+                                        .unwrap_or(0)
+                                        as i32;
 
                                     let chunk = ChatStreamChunk {
                                         id: response_id.clone(),

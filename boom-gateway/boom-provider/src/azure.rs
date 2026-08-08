@@ -1,7 +1,7 @@
+use async_trait::async_trait;
 use boom_core::provider::Provider;
 use boom_core::types::*;
 use boom_core::GatewayError;
-use async_trait::async_trait;
 use futures::stream::StreamExt;
 use reqwest::Client;
 
@@ -59,7 +59,10 @@ impl AzureProvider {
 
 #[async_trait]
 impl Provider for AzureProvider {
-    async fn chat(&self, mut req: ChatCompletionRequest) -> Result<ChatCompletionResponse, GatewayError> {
+    async fn chat(
+        &self,
+        mut req: ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse, GatewayError> {
         req.model = self.deployment.clone();
         let body = serde_json::to_value(&req)
             .map_err(|e| GatewayError::InternalError(format!("Serialize error: {}", e)))?;
@@ -71,14 +74,10 @@ impl Provider for AzureProvider {
         // Non-streaming: upstream sends no data until the entire response is ready.
         // Uses the reqwest Client timeout from deployment config (`create_provider`), not a separate 600s cap.
 
-        let resp = builder
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Azure request failed: {}", e);
-                GatewayError::ProviderError("Upstream provider unavailable".to_string())
-            })?;
+        let resp = builder.json(&body).send().await.map_err(|e| {
+            tracing::error!("Azure request failed: {}", e);
+            GatewayError::ProviderError("Upstream provider unavailable".to_string())
+        })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -89,15 +88,16 @@ impl Provider for AzureProvider {
             });
         }
 
-        resp.json::<ChatCompletionResponse>()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to parse Azure response: {}", e);
-                GatewayError::ProviderError("Failed to process upstream response".to_string())
-            })
+        resp.json::<ChatCompletionResponse>().await.map_err(|e| {
+            tracing::error!("Failed to parse Azure response: {}", e);
+            GatewayError::ProviderError("Failed to process upstream response".to_string())
+        })
     }
 
-    async fn chat_stream(&self, mut req: ChatCompletionRequest) -> Result<ChatStream, GatewayError> {
+    async fn chat_stream(
+        &self,
+        mut req: ChatCompletionRequest,
+    ) -> Result<ChatStream, GatewayError> {
         req.model = self.deployment.clone();
         let mut body = serde_json::to_value(&req)
             .map_err(|e| GatewayError::InternalError(format!("Serialize error: {}", e)))?;
@@ -115,14 +115,10 @@ impl Provider for AzureProvider {
             builder = builder.header("api-key", key);
         }
 
-        let resp = builder
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Azure stream request failed: {}", e);
-                GatewayError::ProviderError("Upstream provider unavailable".to_string())
-            })?;
+        let resp = builder.json(&body).send().await.map_err(|e| {
+            tracing::error!("Azure stream request failed: {}", e);
+            GatewayError::ProviderError("Upstream provider unavailable".to_string())
+        })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -181,13 +177,14 @@ impl Provider for AzureProvider {
             }
         });
 
-        let stream = tokio_stream::wrappers::ReceiverStream::new(rx).filter_map(|result| async move {
-            match result {
-                Ok(Some(chunk)) => Some(Ok(chunk)),
-                Ok(None) => None,
-                Err(e) => Some(Err(e)),
-            }
-        });
+        let stream =
+            tokio_stream::wrappers::ReceiverStream::new(rx).filter_map(|result| async move {
+                match result {
+                    Ok(Some(chunk)) => Some(Ok(chunk)),
+                    Ok(None) => None,
+                    Err(e) => Some(Err(e)),
+                }
+            });
 
         Ok(Box::pin(stream))
     }

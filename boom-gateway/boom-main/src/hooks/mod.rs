@@ -21,21 +21,14 @@
 
 use boom_config::{HookFailureMode, PreAuthHookConfig};
 use boom_core::GatewayError;
-use boom_hooks_sdk::{PreAuthAction, PreAuthRequest, PreAuthResponse, return_codes};
+use boom_hooks_sdk::{return_codes, PreAuthAction, PreAuthRequest, PreAuthResponse};
 use libloading::{Library, Symbol};
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
-use tracing;
 
 /// Function pointer signature for the `pre_auth` C-ABI symbol.
-type PreAuthFn = unsafe extern "C" fn(
-    *const u8,
-    u32,
-    *mut u8,
-    u32,
-    *mut u32,
-) -> i32;
+type PreAuthFn = unsafe extern "C" fn(*const u8, u32, *mut u8, u32, *mut u32) -> i32;
 
 /// Function pointer signature for the `hook_init` C-ABI symbol.
 type HookInitFn = unsafe extern "C" fn(*const u8, u32) -> i32;
@@ -78,8 +71,8 @@ impl LoadedHook {
         // (they get a no-op init); the symbol lookup is best-effort.
         if let Ok(init_sym) = unsafe { lib.get::<HookInitFn>(b"hook_init\0") } {
             let cfg_bytes = cfg.config.as_bytes();
-            let rc = catch_unwind(AssertUnwindSafe(|| {
-                unsafe { init_sym(cfg_bytes.as_ptr(), cfg_bytes.len() as u32) }
+            let rc = catch_unwind(AssertUnwindSafe(|| unsafe {
+                init_sym(cfg_bytes.as_ptr(), cfg_bytes.len() as u32)
             }));
             match rc {
                 Ok(return_codes::OK) => {}
@@ -91,7 +84,8 @@ impl LoadedHook {
                 }
                 Err(_) => {
                     return Err(GatewayError::ConfigError(format!(
-                        "hook: hook_init panicked for {}", cfg.path
+                        "hook: hook_init panicked for {}",
+                        cfg.path
                     )));
                 }
             }
@@ -101,13 +95,14 @@ impl LoadedHook {
         // lifetime — sound because `lib` (held in this struct) keeps the
         // backing memory alive for as long as the Symbol is used.
         let call_sym = unsafe {
-            let raw: Symbol<'_, PreAuthFn> = lib
-                .get::<PreAuthFn>(symbol_name)
-                .map_err(|e| GatewayError::ConfigError(format!(
+            let raw: Symbol<'_, PreAuthFn> = lib.get::<PreAuthFn>(symbol_name).map_err(|e| {
+                GatewayError::ConfigError(format!(
                     "hook: symbol {:?} not found in {}: {}",
                     std::str::from_utf8(symbol_name).unwrap_or("?"),
-                    cfg.path, e
-                )))?;
+                    cfg.path,
+                    e
+                ))
+            })?;
             // SAFETY: `raw` borrows `lib`. We are about to move `lib` into
             // the same struct as the transmuted symbol, so the library
             // outlives any use of the symbol. The borrow checker can't see
@@ -163,18 +158,22 @@ impl LoadedHook {
         match rc {
             return_codes::OK | return_codes::BUSINESS => {
                 let resp: PreAuthResponse = serde_json::from_slice(&buf[..out_len as usize])
-                    .map_err(|e| {
-                        GatewayError::InternalError(format!("parse hook resp: {}", e))
-                    })?;
+                    .map_err(|e| GatewayError::InternalError(format!("parse hook resp: {}", e)))?;
                 Ok(resp.action)
             }
             return_codes::OVERFLOW => {
-                tracing::error!("hook pre_auth response overflowed {} bytes", RESPONSE_BUF_SIZE);
+                tracing::error!(
+                    "hook pre_auth response overflowed {} bytes",
+                    RESPONSE_BUF_SIZE
+                );
                 Err(GatewayError::InternalError("hook response overflow".into()))
             }
-            return_codes::INTERNAL | _ => {
+            _ => {
                 tracing::error!(rc, "hook pre_auth returned internal error");
-                Err(GatewayError::InternalError(format!("hook internal error (rc={})", rc)))
+                Err(GatewayError::InternalError(format!(
+                    "hook internal error (rc={})",
+                    rc
+                )))
             }
         }
     }
@@ -232,11 +231,7 @@ impl HookRegistry {
     ///
     /// `headers` is the full request HeaderMap; the registry filters it down
     /// to `allowed_headers` before passing to the plugin.
-    pub fn pre_auth(
-        &self,
-        raw_key: &str,
-        headers: &axum::http::HeaderMap,
-    ) -> PreAuthOutcome {
+    pub fn pre_auth(&self, raw_key: &str, headers: &axum::http::HeaderMap) -> PreAuthOutcome {
         let Some(hook) = self.pre_auth.as_ref() else {
             return PreAuthOutcome::NoHook;
         };
@@ -361,15 +356,18 @@ mod tests {
         // "specific prefix value". This is a property of the *example hook's*
         // OnceLock design, not the hook framework.
         let path = find_hook_so();
-        let cfg = make_cfg(&path, HookFailureMode::Allow, r#"{"prefix":"sk-customer-"}"#);
+        let cfg = make_cfg(
+            &path,
+            HookFailureMode::Allow,
+            r#"{"prefix":"sk-customer-"}"#,
+        );
         let reg = HookRegistry::from_config(&cfg).expect("plugin should load");
 
         let outcome = reg.pre_auth("sk-abc", &HeaderMap::new());
         match outcome {
             PreAuthOutcome::Replace(new_key) => {
                 assert!(
-                    new_key == "sk-customer-sk-abc"
-                        || new_key == "sk-default-sk-abc",
+                    new_key == "sk-customer-sk-abc" || new_key == "sk-default-sk-abc",
                     "unexpected new_key: {new_key}"
                 );
             }
@@ -403,8 +401,7 @@ mod tests {
                 // Accept either the default or the persisted value from an
                 // earlier test in the same process.
                 assert!(
-                    new_key == "sk-default-sk-abc"
-                        || new_key == "sk-customer-sk-abc",
+                    new_key == "sk-default-sk-abc" || new_key == "sk-customer-sk-abc",
                     "unexpected new_key: {new_key}"
                 );
             }
@@ -415,11 +412,7 @@ mod tests {
     #[test]
     #[ignore]
     fn missing_path_load_returns_config_error() {
-        let cfg = make_cfg(
-            "/nonexistent/path/libfoo.so",
-            HookFailureMode::Allow,
-            "{}",
-        );
+        let cfg = make_cfg("/nonexistent/path/libfoo.so", HookFailureMode::Allow, "{}");
         let result = HookRegistry::from_config(&cfg);
         assert!(result.is_err());
     }
@@ -433,5 +426,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-
-

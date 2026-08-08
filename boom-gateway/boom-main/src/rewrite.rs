@@ -193,7 +193,11 @@ mod tests {
         assert!(strip_cc_attribution_anthropic(&mut req));
         let sys_msg = req.messages.iter().find(|m| m.role == "system").unwrap();
         if let AnthropicContent::Blocks(parts) = &sys_msg.content {
-            assert_eq!(parts.len(), 1, "only the attribution text block should be removed");
+            assert_eq!(
+                parts.len(),
+                1,
+                "only the attribution text block should be removed"
+            );
         }
     }
 

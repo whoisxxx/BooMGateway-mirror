@@ -16,14 +16,14 @@ pub use deployment_store::{
 };
 pub use fusion::{register_fusion_providers, FusionRuntime};
 pub use hybrid_router::{
-    ClassifyRequest, ClassificationStrategy, HybridRouter, StrategyRegistry, TierClassifier,
+    ClassificationStrategy, ClassifyRequest, HybridRouter, StrategyRegistry, TierClassifier,
 };
 pub use inflight::{DeploymentInFlightStat, InFlightGuard, InFlightStat, InFlightTracker};
-pub use policy::load_helpers;
-pub use policy::SchedulePolicy;
-pub use policy::round_robin::RoundRobinPolicy;
 pub use policy::key_affinity::KeyAffinityPolicy;
 pub use policy::kvc_aware::KvcAwarePolicy;
+pub use policy::load_helpers;
+pub use policy::round_robin::RoundRobinPolicy;
+pub use policy::SchedulePolicy;
 pub use rebalance::{RebalanceCounter, RebalanceMove, RebalanceMoveTracker};
 pub use request_rate::RequestRateTracker;
 pub use router::Router;

@@ -126,15 +126,18 @@ impl InFlightGuard {
     /// Acquire an in-flight slot (model-level tracking only).
     pub fn new(tracker: Arc<InFlightTracker>, model: &str, input_chars: u64) -> Self {
         {
-            let metrics = tracker
-                .metrics
-                .entry(model.to_string())
-                .or_insert_with(|| InFlightMetrics {
-                    request_count: AtomicU64::new(0),
-                    input_chars: AtomicU64::new(0),
-                });
+            let metrics =
+                tracker
+                    .metrics
+                    .entry(model.to_string())
+                    .or_insert_with(|| InFlightMetrics {
+                        request_count: AtomicU64::new(0),
+                        input_chars: AtomicU64::new(0),
+                    });
             metrics.request_count.fetch_add(1, Ordering::Relaxed);
-            metrics.input_chars.fetch_add(input_chars, Ordering::Relaxed);
+            metrics
+                .input_chars
+                .fetch_add(input_chars, Ordering::Relaxed);
         }
 
         Self {
@@ -154,15 +157,18 @@ impl InFlightGuard {
     ) -> Self {
         // Model-level tracking.
         {
-            let metrics = tracker
-                .metrics
-                .entry(model.to_string())
-                .or_insert_with(|| InFlightMetrics {
-                    request_count: AtomicU64::new(0),
-                    input_chars: AtomicU64::new(0),
-                });
+            let metrics =
+                tracker
+                    .metrics
+                    .entry(model.to_string())
+                    .or_insert_with(|| InFlightMetrics {
+                        request_count: AtomicU64::new(0),
+                        input_chars: AtomicU64::new(0),
+                    });
             metrics.request_count.fetch_add(1, Ordering::Relaxed);
-            metrics.input_chars.fetch_add(input_chars, Ordering::Relaxed);
+            metrics
+                .input_chars
+                .fetch_add(input_chars, Ordering::Relaxed);
         }
 
         // Deployment-level tracking.
@@ -193,14 +199,17 @@ impl Drop for InFlightGuard {
         // Decrement model-level metrics.
         if let Some(metrics) = self.tracker.metrics.get(&self.model) {
             metrics.request_count.fetch_sub(1, Ordering::Relaxed);
-            metrics.input_chars.fetch_sub(self.input_chars, Ordering::Relaxed);
+            metrics
+                .input_chars
+                .fetch_sub(self.input_chars, Ordering::Relaxed);
         }
 
         // Decrement deployment-level metrics.
         if let Some(ref dk) = self.deployment_key {
             if let Some(dm) = self.tracker.deployment_metrics.get(dk) {
                 dm.request_count.fetch_sub(1, Ordering::Relaxed);
-                dm.input_chars.fetch_sub(self.input_chars, Ordering::Relaxed);
+                dm.input_chars
+                    .fetch_sub(self.input_chars, Ordering::Relaxed);
             }
         }
     }

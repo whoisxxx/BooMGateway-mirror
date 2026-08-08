@@ -64,10 +64,7 @@ pub fn deployment_load(
             // which ≈ inflight. Use max to avoid double-counting.
             let raw_load = std::cmp::max(inflight, queued);
 
-            let capacity = queue_info
-                .as_ref()
-                .map(|q| q.max_capacity(id))
-                .unwrap_or(0);
+            let capacity = queue_info.as_ref().map(|q| q.max_capacity(id)).unwrap_or(0);
 
             if capacity > 0 && raw_load > 0 {
                 // Normalize to percentage: raw_load * 100 / capacity.

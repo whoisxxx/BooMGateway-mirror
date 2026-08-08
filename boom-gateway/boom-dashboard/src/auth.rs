@@ -56,6 +56,7 @@ impl<S: Send + Sync> FromRequestParts<S> for DashboardSession {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn extract_session(parts: &mut Parts) -> Result<DashboardSession, Response> {
     let state = parts
         .extensions
@@ -93,9 +94,7 @@ fn extract_session(parts: &mut Parts) -> Result<DashboardSession, Response> {
         &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
         &Validation::default(),
     )
-    .map_err(|_| {
-        (axum::http::StatusCode::UNAUTHORIZED, "Invalid session").into_response()
-    })?;
+    .map_err(|_| (axum::http::StatusCode::UNAUTHORIZED, "Invalid session").into_response())?;
 
     Ok(DashboardSession {
         claims: token_data.claims,
@@ -112,6 +111,7 @@ pub struct AdminSession {
 impl<S: Send + Sync> FromRequestParts<S> for AdminSession {
     type Rejection = Response;
 
+    #[allow(clippy::result_large_err)]
     fn from_request_parts(
         parts: &mut Parts,
         _state: &S,
@@ -122,10 +122,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AdminSession {
                     claims: session.claims,
                 })
             } else {
-                Err(
-                    (axum::http::StatusCode::FORBIDDEN, "Admin access required")
-                        .into_response(),
-                )
+                Err((axum::http::StatusCode::FORBIDDEN, "Admin access required").into_response())
             }
         });
         std::future::ready(result)
@@ -218,9 +215,8 @@ fn record_login_failure(state: &DashboardState, client_ip: &str) -> bool {
                 } else {
                     PER_FAILURE_LOCKOUT
                 };
-                attempt.locked_until = Some(
-                    attempt.locked_until.map_or(now, |t| t.max(now)) + extra,
-                );
+                attempt.locked_until =
+                    Some(attempt.locked_until.map_or(now, |t| t.max(now)) + extra);
             }
         })
         .or_insert(crate::state::LoginAttempt {
@@ -255,7 +251,10 @@ pub async fn login(
         );
         return json_error_response(
             axum::http::StatusCode::TOO_MANY_REQUESTS,
-            &format!("Too many login attempts. Try again in {} seconds.", remaining.as_secs()),
+            &format!(
+                "Too many login attempts. Try again in {} seconds.",
+                remaining.as_secs()
+            ),
         );
     }
 
@@ -308,7 +307,13 @@ pub async fn login(
 
         clear_login_failures(&state, &client_ip);
         tracing::info!(ip = %client_ip, "Admin login success");
-        return sign_and_respond(&state, "admin".to_string(), "admin".to_string(), String::new(), None);
+        return sign_and_respond(
+            &state,
+            "admin".to_string(),
+            "admin".to_string(),
+            String::new(),
+            None,
+        );
     }
 
     // 4. User login: hash the key, then lookup in DB.
@@ -328,12 +333,14 @@ pub async fn login(
     // and is litellm-compatible. Prefix (if any) participates in the hash.
     let token_hash = hash_token(&api_key);
 
-    let row_result: Result<Option<(Option<String>, Option<String>, Option<bool>)>, _> = sqlx::query_as(
-        r#"SELECT user_id, key_alias, blocked FROM "boom_verification_token" WHERE token = $1"#,
-    )
-    .bind(&token_hash)
-    .fetch_optional(db_pool)
-    .await;
+    #[allow(clippy::type_complexity)]
+    let row_result: Result<Option<(Option<String>, Option<String>, Option<bool>)>, _> =
+        sqlx::query_as(
+            r#"SELECT user_id, key_alias, blocked FROM "boom_verification_token" WHERE token = $1"#,
+        )
+        .bind(&token_hash)
+        .fetch_optional(db_pool)
+        .await;
 
     let row = match row_result {
         Ok(r) => r,
@@ -360,10 +367,7 @@ pub async fn login(
                 token_hash = &token_hash[..8.min(token_hash.len())],
                 "Login: key not found in DB"
             );
-            return json_error_response(
-                axum::http::StatusCode::UNAUTHORIZED,
-                "Invalid API key",
-            );
+            return json_error_response(axum::http::StatusCode::UNAUTHORIZED, "Invalid API key");
         }
     };
 
@@ -374,10 +378,7 @@ pub async fn login(
             token_hash = &token_hash[..8.min(token_hash.len())],
             "Login: key is blocked"
         );
-        return json_error_response(
-            axum::http::StatusCode::FORBIDDEN,
-            "Key is blocked",
-        );
+        return json_error_response(axum::http::StatusCode::FORBIDDEN, "Key is blocked");
     }
 
     clear_login_failures(&state, &client_ip);
@@ -388,11 +389,15 @@ pub async fn login(
     );
 
     // Use key_alias as display name, fallback to user_id or "user".
-    let display_name = key_alias
-        .or(uid)
-        .unwrap_or_else(|| "user".to_string());
+    let display_name = key_alias.or(uid).unwrap_or_else(|| "user".to_string());
 
-    sign_and_respond(&state, display_name, "user".to_string(), token_hash, Some(api_key.clone()))
+    sign_and_respond(
+        &state,
+        display_name,
+        "user".to_string(),
+        token_hash,
+        Some(api_key.clone()),
+    )
 }
 
 fn sign_and_respond(
@@ -431,7 +436,11 @@ fn sign_and_respond(
         SESSION_COOKIE_NAME, token, SESSION_DURATION_SECS
     );
 
-    let body = Json(LoginResponse { role, user_id, api_key });
+    let body = Json(LoginResponse {
+        role,
+        user_id,
+        api_key,
+    });
 
     ([(SET_COOKIE, cookie)], body).into_response()
 }

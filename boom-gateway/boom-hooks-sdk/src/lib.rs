@@ -137,6 +137,7 @@ pub fn hash_key(key: &str) -> String {
 /// # Safety
 /// Pointers must be valid for their stated lengths. The gateway is the only
 /// intended caller and constructs them from Rust slices.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn pre_auth_entry<F>(
     req_ptr: *const u8,
     req_len: u32,
@@ -150,9 +151,7 @@ where
 {
     let result = std::panic::catch_unwind(|| {
         // Safety: caller (gateway) passes a valid slice.
-        let req_bytes = unsafe {
-            std::slice::from_raw_parts(req_ptr, req_len as usize)
-        };
+        let req_bytes = unsafe { std::slice::from_raw_parts(req_ptr, req_len as usize) };
         let req: PreAuthRequest = match serde_json::from_slice(req_bytes) {
             Ok(r) => r,
             Err(e) => return Err(HookError::internal(format!("deserialize req: {e}"))),
@@ -213,6 +212,7 @@ where
 /// Pass the raw config bytes (or None) to a closure. Returns 0 on success,
 /// 3 on any error or panic. Plugins use this so they don't have to write
 /// the catch_unwind boilerplate themselves.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn hook_init_entry<F>(config_ptr: *const u8, config_len: u32, handler: F) -> i32
 where
     F: Fn(Option<&str>) -> Result<(), HookError> + std::panic::RefUnwindSafe,
@@ -222,9 +222,7 @@ where
             None
         } else {
             // Safety: caller (gateway) passes valid slice.
-            let bytes = unsafe {
-                std::slice::from_raw_parts(config_ptr, config_len as usize)
-            };
+            let bytes = unsafe { std::slice::from_raw_parts(config_ptr, config_len as usize) };
             Some(std::str::from_utf8(bytes).unwrap_or(""))
         };
         handler(config)
@@ -337,9 +335,7 @@ mod tests {
             raw_key: "sk-abc".into(),
             headers: HashMap::new(),
         };
-        let (rc, body) = run_pre_auth(req, |_| {
-            Err(HookError::Reject("missing ucid".into()))
-        });
+        let (rc, body) = run_pre_auth(req, |_| Err(HookError::Reject("missing ucid".into())));
         assert_eq!(rc, return_codes::BUSINESS);
         let resp: PreAuthResponse = serde_json::from_slice(&body).unwrap();
         match resp.action {
@@ -354,9 +350,7 @@ mod tests {
             raw_key: "sk-abc".into(),
             headers: HashMap::new(),
         };
-        let (rc, _body) = run_pre_auth(req, |_| {
-            Err(HookError::Internal("db down".into()))
-        });
+        let (rc, _body) = run_pre_auth(req, |_| Err(HookError::Internal("db down".into())));
         assert_eq!(rc, return_codes::INTERNAL);
     }
 
@@ -382,9 +376,11 @@ mod tests {
             buf.as_mut_ptr(),
             buf.len() as u32,
             &mut out_len,
-            |_| Ok(PreAuthResponse {
-                action: PreAuthAction::Continue,
-            }),
+            |_| {
+                Ok(PreAuthResponse {
+                    action: PreAuthAction::Continue,
+                })
+            },
         );
         assert_eq!(rc, return_codes::INTERNAL);
     }
@@ -424,4 +420,3 @@ mod tests {
         assert_eq!(rc, return_codes::INTERNAL);
     }
 }
-

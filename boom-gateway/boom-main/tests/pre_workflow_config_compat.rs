@@ -158,9 +158,7 @@ async fn pre_workflow_config_starts_and_serves_normal_chat_requests() {
     assert!(parsed.workflow_settings.models.is_empty());
     assert!(parsed.workflow_settings.workflows.is_empty());
     assert_eq!(
-        parsed
-            .router_settings
-            .flow_control_queue_timeout_secs(),
+        parsed.router_settings.flow_control_queue_timeout_secs(),
         1200
     );
 

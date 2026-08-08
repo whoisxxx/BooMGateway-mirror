@@ -12,4 +12,4 @@ pub mod classifier;
 pub mod stats;
 
 pub use classifier::{classify, is_anthropic_path, ClientKind, CLIENT_TYPE_HEADER};
-pub use stats::{AgentStatsSnapshot, AgentStatsTracker, MinuteBucket, AgentSummary};
+pub use stats::{AgentStatsSnapshot, AgentStatsTracker, AgentSummary, MinuteBucket};

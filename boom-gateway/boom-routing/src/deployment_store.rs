@@ -41,9 +41,14 @@ impl ModelCostRate {
     /// Compute total cost for a request given token counts.
     /// When `cached_input_cost_per_token` is zero, cache hits are billed
     /// at the regular input rate (legacy behavior).
-    pub fn compute_cost(&self, input_tokens: u64, cached_tokens: u64, output_tokens: u64) -> Decimal {
-        let (regular_input, cached_input, output) = self
-            .compute_cost_breakdown(input_tokens, cached_tokens, output_tokens);
+    pub fn compute_cost(
+        &self,
+        input_tokens: u64,
+        cached_tokens: u64,
+        output_tokens: u64,
+    ) -> Decimal {
+        let (regular_input, cached_input, output) =
+            self.compute_cost_breakdown(input_tokens, cached_tokens, output_tokens);
         regular_input + cached_input + output
     }
 
@@ -285,11 +290,7 @@ impl DeploymentStore {
     // ── In-memory operations ──
 
     /// Replace all deployments for a model name.
-    pub fn set_deployments(
-        &self,
-        model_name: String,
-        providers: Vec<Arc<dyn Provider>>,
-    ) -> bool {
+    pub fn set_deployments(&self, model_name: String, providers: Vec<Arc<dyn Provider>>) -> bool {
         if let Some(expected) = self.exclusive_providers.get(&model_name) {
             tracing::error!(
                 model = %model_name,
@@ -445,12 +446,14 @@ impl DeploymentStore {
         self.deployments.len()
     }
 
+    /// Whether there are no model names.
+    pub fn is_empty(&self) -> bool {
+        self.deployments.is_empty()
+    }
+
     /// Total deployment count across all models.
     pub fn total_deployments(&self) -> usize {
-        self.deployments
-            .iter()
-            .map(|r| r.value().len())
-            .sum()
+        self.deployments.iter().map(|r| r.value().len()).sum()
     }
 
     /// Reverse lookup: find the model_name that owns a deployment with the given deployment_id.
@@ -526,12 +529,17 @@ impl DeploymentStore {
                 .await?;
         }
 
-        tracing::info!("Synced {} deployment(s) from YAML to DB", yaml_deployments.len());
+        tracing::info!(
+            "Synced {} deployment(s) from YAML to DB",
+            yaml_deployments.len()
+        );
         Ok(())
     }
 
     /// Load source='db' deployment rows from DB (provider creation happens in caller).
-    pub async fn load_db_only_rows(pool: &sqlx::PgPool) -> Result<Vec<DeploymentProviderRow>, sqlx::Error> {
+    pub async fn load_db_only_rows(
+        pool: &sqlx::PgPool,
+    ) -> Result<Vec<DeploymentProviderRow>, sqlx::Error> {
         sqlx::query_as::<_, DeploymentProviderRow>(
             r#"SELECT model_name, litellm_model, api_key, api_key_env, api_base, api_version,
                       aws_region_name, timeout, headers, deployment_id, client_type_header
@@ -564,7 +572,9 @@ impl DeploymentStore {
     }
 
     /// Load all deployment rows that can be probed by the health monitor.
-    pub async fn list_health_check_targets(pool: &sqlx::PgPool) -> Result<Vec<DeploymentHealthTarget>, sqlx::Error> {
+    pub async fn list_health_check_targets(
+        pool: &sqlx::PgPool,
+    ) -> Result<Vec<DeploymentHealthTarget>, sqlx::Error> {
         sqlx::query_as::<_, DeploymentHealthTarget>(
             r#"SELECT model_name, deployment_id, api_base, enabled, auto_disabled
                FROM boom_model_deployment
@@ -576,7 +586,10 @@ impl DeploymentStore {
     }
 
     /// Load enabled deployment rows for a specific model (for reload after update/delete).
-    pub async fn load_model_rows(pool: &sqlx::PgPool, model_name: &str) -> Result<Vec<DeploymentProviderRow>, sqlx::Error> {
+    pub async fn load_model_rows(
+        pool: &sqlx::PgPool,
+        model_name: &str,
+    ) -> Result<Vec<DeploymentProviderRow>, sqlx::Error> {
         sqlx::query_as::<_, DeploymentProviderRow>(
             r#"SELECT model_name, litellm_model, api_key, api_key_env, api_base, api_version,
                       aws_region_name, timeout, headers, deployment_id, client_type_header
@@ -595,7 +608,10 @@ impl DeploymentStore {
     /// requires a non-empty deployment_id to register a slot, so without this
     /// auto-generation, web-configured `max_inflight` / `max_context` would
     /// silently no-op (the root cause of stats page showing no inflight data).
-    pub async fn create_db(pool: &sqlx::PgPool, input: &DeploymentInput) -> Result<uuid::Uuid, sqlx::Error> {
+    pub async fn create_db(
+        pool: &sqlx::PgPool,
+        input: &DeploymentInput,
+    ) -> Result<uuid::Uuid, sqlx::Error> {
         let deployment_id: String = match &input.deployment_id {
             Some(d) if !d.is_empty() => d.clone(),
             _ => uuid::Uuid::new_v4().to_string(),
@@ -623,7 +639,12 @@ impl DeploymentStore {
             .bind(input.max_context_len)
             .bind(input.client_type_header)
             .bind(input.serve_not_match)
-            .bind(input.model_info.as_ref().unwrap_or(&serde_json::Value::Null))
+            .bind(
+                input
+                    .model_info
+                    .as_ref()
+                    .unwrap_or(&serde_json::Value::Null),
+            )
             .fetch_one(pool)
             .await?;
 
@@ -631,7 +652,11 @@ impl DeploymentStore {
     }
 
     /// Update a deployment in DB by ID.
-    pub async fn update_db(pool: &sqlx::PgPool, id: uuid::Uuid, input: &DeploymentInput) -> Result<bool, sqlx::Error> {
+    pub async fn update_db(
+        pool: &sqlx::PgPool,
+        id: uuid::Uuid,
+        input: &DeploymentInput,
+    ) -> Result<bool, sqlx::Error> {
         let result = sqlx::query(
             r#"UPDATE boom_model_deployment
                SET model_name = $2, litellm_model = $3,
@@ -679,7 +704,12 @@ impl DeploymentStore {
         .bind(input.max_context_len)
         .bind(input.client_type_header)
         .bind(input.serve_not_match)
-        .bind(input.model_info.as_ref().unwrap_or(&serde_json::Value::Null))
+        .bind(
+            input
+                .model_info
+                .as_ref()
+                .unwrap_or(&serde_json::Value::Null),
+        )
         .execute(pool)
         .await?;
 
@@ -687,7 +717,10 @@ impl DeploymentStore {
     }
 
     /// Delete a deployment from DB by ID. Returns (model_name, deployment_id) of the deleted row.
-    pub async fn delete_db(pool: &sqlx::PgPool, id: uuid::Uuid) -> Result<Option<(String, Option<String>)>, sqlx::Error> {
+    pub async fn delete_db(
+        pool: &sqlx::PgPool,
+        id: uuid::Uuid,
+    ) -> Result<Option<(String, Option<String>)>, sqlx::Error> {
         // Get info before deleting.
         let info: Option<(String, Option<String>)> = sqlx::query_as(
             r#"SELECT model_name, deployment_id FROM boom_model_deployment WHERE id = $1"#,
@@ -711,7 +744,10 @@ impl DeploymentStore {
 
     /// Auto-disable a deployment: set enabled=false, auto_disabled=true.
     /// Returns the actual model_name of the disabled deployment, or None if not found.
-    pub async fn auto_disable_db(pool: &sqlx::PgPool, deployment_id: &str) -> Result<Option<String>, sqlx::Error> {
+    pub async fn auto_disable_db(
+        pool: &sqlx::PgPool,
+        deployment_id: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
         let row: Option<(String,)> = sqlx::query_as(
             r#"UPDATE boom_model_deployment
                SET enabled = false, auto_disabled = true, updated_at = NOW()
@@ -733,7 +769,10 @@ impl DeploymentStore {
 
     /// Auto-enable a deployment that was previously auto-disabled.
     /// Returns the actual model_name of the enabled deployment, or None if not found/not auto-disabled.
-    pub async fn auto_enable_db(pool: &sqlx::PgPool, deployment_id: &str) -> Result<Option<String>, sqlx::Error> {
+    pub async fn auto_enable_db(
+        pool: &sqlx::PgPool,
+        deployment_id: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
         let row: Option<(String,)> = sqlx::query_as(
             r#"UPDATE boom_model_deployment
                SET enabled = true, auto_disabled = false, updated_at = NOW()
@@ -882,13 +921,17 @@ mod tests {
     #[test]
     fn snapshot_db_includes_disabled_rows() {
         assert!(
-            !SNAPSHOT_DB_SQL.to_lowercase().contains("enabled is not false"),
+            !SNAPSHOT_DB_SQL
+                .to_lowercase()
+                .contains("enabled is not false"),
             "snapshot_db SQL must NOT filter by enabled. \
              Putting `WHERE enabled IS NOT FALSE` back here causes disabled \
              deployments to be lost on YAML round-trip. See CLAUDE.md §9."
         );
         assert!(
-            SNAPSHOT_DB_SQL.to_lowercase().contains("order by model_name"),
+            SNAPSHOT_DB_SQL
+                .to_lowercase()
+                .contains("order by model_name"),
             "snapshot_db SQL must ORDER BY model_name for deterministic output"
         );
     }
@@ -898,7 +941,11 @@ mod tests {
     fn core_columns_has_no_duplicates() {
         let mut seen = std::collections::HashSet::new();
         for col in DEPLOYMENT_CORE_COLUMNS {
-            assert!(seen.insert(*col), "duplicate column `{}` in DEPLOYMENT_CORE_COLUMNS", col);
+            assert!(
+                seen.insert(*col),
+                "duplicate column `{}` in DEPLOYMENT_CORE_COLUMNS",
+                col
+            );
         }
     }
 }

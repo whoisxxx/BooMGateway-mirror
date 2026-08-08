@@ -1,6 +1,6 @@
 use crate::{
-    AliasStore, DeploymentStore, InFlightGuard, InFlightTracker, ModelCostRate,
-    RequestRateTracker, Router,
+    AliasStore, DeploymentStore, InFlightGuard, InFlightTracker, ModelCostRate, RequestRateTracker,
+    Router,
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -37,6 +37,7 @@ pub struct FusionRuntime {
 }
 
 impl FusionRuntime {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         router: Weak<Router>,
         deployment_store: Arc<DeploymentStore>,
@@ -277,10 +278,7 @@ impl RoutingModelInvoker {
 
         let deployment_id = provider.deployment_id().map(str::to_string);
         let billing_model = router.resolve_model_name(&resolved_model);
-        let cost_rate = self
-            .runtime
-            .deployment_store
-            .get_cost_rate(&billing_model);
+        let cost_rate = self.runtime.deployment_store.get_cost_rate(&billing_model);
         if record_prefix {
             if let (Some(index), Some(worker_id)) = (kv_index, provider.kv_worker_id()) {
                 index.record_request_prefix(
@@ -564,9 +562,7 @@ fn update_usage_snapshot(target: &mut Usage, usage: &StreamUsage) {
 
 fn usage_delta(current: &Usage, previous: &Usage) -> Usage {
     Usage {
-        prompt_tokens: current
-            .prompt_tokens
-            .saturating_sub(previous.prompt_tokens),
+        prompt_tokens: current.prompt_tokens.saturating_sub(previous.prompt_tokens),
         completion_tokens: current
             .completion_tokens
             .saturating_sub(previous.completion_tokens),
@@ -586,12 +582,12 @@ fn usage_delta(current: &Usage, previous: &Usage) -> Usage {
                     }
                 })
             }),
-        cache_creation_input_tokens: current.cache_creation_input_tokens.map(|value| {
-            value.saturating_sub(previous.cache_creation_input_tokens.unwrap_or(0))
-        }),
-        cache_read_input_tokens: current.cache_read_input_tokens.map(|value| {
-            value.saturating_sub(previous.cache_read_input_tokens.unwrap_or(0))
-        }),
+        cache_creation_input_tokens: current
+            .cache_creation_input_tokens
+            .map(|value| value.saturating_sub(previous.cache_creation_input_tokens.unwrap_or(0))),
+        cache_read_input_tokens: current
+            .cache_read_input_tokens
+            .map(|value| value.saturating_sub(previous.cache_read_input_tokens.unwrap_or(0))),
     }
 }
 
@@ -665,8 +661,8 @@ mod tests {
     use boom_config::Config;
     use boom_core::provider::{Provider, ProviderBilling, ProviderCallContext};
     use boom_core::types::{
-        ChatCompletionRequest, ChatCompletionResponse, ChatStream, ChatStreamChunk, Choice, Message,
-        MessageContent, MessageRole, StreamChoice, StreamDelta, StreamUsage, Usage,
+        ChatCompletionRequest, ChatCompletionResponse, ChatStream, ChatStreamChunk, Choice,
+        Message, MessageContent, MessageRole, StreamChoice, StreamDelta, StreamUsage, Usage,
     };
     use boom_core::GatewayError;
     use boom_flowcontrol::FlowController;
@@ -836,6 +832,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn fusion_children_reenter_router_with_parent_context() {
         let config: Config = serde_yaml::from_str(
             r#"
@@ -886,18 +883,9 @@ workflow_settings:
         for model in ["panel-a", "panel-b", "aggregator"] {
             deployment_store.add_deployment(model, fake.clone());
         }
-        deployment_store.set_cost_rate(
-            "panel-a",
-            ModelCostRate::new(1.into(), 10.into()),
-        );
-        deployment_store.set_cost_rate(
-            "panel-b",
-            ModelCostRate::new(2.into(), 20.into()),
-        );
-        deployment_store.set_cost_rate(
-            "aggregator",
-            ModelCostRate::new(3.into(), 30.into()),
-        );
+        deployment_store.set_cost_rate("panel-a", ModelCostRate::new(1.into(), 10.into()));
+        deployment_store.set_cost_rate("panel-b", ModelCostRate::new(2.into(), 20.into()));
+        deployment_store.set_cost_rate("aggregator", ModelCostRate::new(3.into(), 30.into()));
 
         let key_hashes = Arc::new(Mutex::new(Vec::new()));
         let alias_store = Arc::new(AliasStore::new());
@@ -1010,10 +998,7 @@ workflow_settings:
         assert_eq!(stream_billing.actual_usage().unwrap().total_tokens, 9);
         assert_eq!(stream_billing.actual_cost().unwrap().total(), 72.into());
 
-        fail_models
-            .lock()
-            .unwrap()
-            .insert("aggregator".to_string());
+        fail_models.lock().unwrap().insert("aggregator".to_string());
         let fallback_billing = ProviderBilling::default();
         let fallback = fusion
             .chat_with_context(

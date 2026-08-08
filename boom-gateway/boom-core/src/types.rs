@@ -474,6 +474,7 @@ impl AuthIdentity {
     /// - "all-proxy-models" → cleared (all allowed)
     /// - Empty list → all models allowed
     /// - Non-empty list → exact match or wildcard "*"
+    ///
     /// Simple direct-match check (used internally).
     /// Deployment-aware wildcard logic is handled in the route handler.
     pub fn can_call_model(&self, model: &str) -> bool {
@@ -679,17 +680,14 @@ pub struct AnthropicUsage {
 ///
 /// - `Key` (default): plan is assigned to a key. Only `key_*` fields apply.
 /// - `Team`: plan is assigned to a team. Only `team_*` fields apply.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq)]
+#[derive(
+    Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, Hash, Eq, PartialEq,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum PlanType {
+    #[default]
     Key,
     Team,
-}
-
-impl Default for PlanType {
-    fn default() -> Self {
-        PlanType::Key
-    }
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -778,9 +776,7 @@ impl WindowLimit {
 /// Lives in boom-core so every boom-* module that owns a struct with
 /// `Vec<WindowLimit>` fields can attach it via `#[serde(deserialize_with = ...)]`
 /// without depending on boom-config.
-pub fn deserialize_window_limit_vec<'de, D>(
-    deserializer: D,
-) -> Result<Vec<WindowLimit>, D::Error>
+pub fn deserialize_window_limit_vec<'de, D>(deserializer: D) -> Result<Vec<WindowLimit>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {

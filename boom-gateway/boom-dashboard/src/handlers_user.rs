@@ -36,8 +36,14 @@ pub async fn get_plan(
             let wl_json: Vec<serde_json::Value> = window_limits
                 .iter()
                 .map(|w| {
-                    let counts = w.counts.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null);
-                    let tokens = w.tokens.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null);
+                    let counts = w
+                        .counts
+                        .map(serde_json::Value::from)
+                        .unwrap_or(serde_json::Value::Null);
+                    let tokens = w
+                        .tokens
+                        .map(serde_json::Value::from)
+                        .unwrap_or(serde_json::Value::Null);
                     let costs = w
                         .costs
                         .map(|c| serde_json::Value::String(c.to_string()))
@@ -144,7 +150,9 @@ pub async fn get_usage(
         .map(|&secs| {
             // Find plan config for this window_secs (if any).
             let wl = plan_window_limits.iter().find(|w| w.window_secs == secs);
-            let counts_limit = wl.and_then(|w| w.counts).or(if secs == 60 { plan_rpm } else { None });
+            let counts_limit =
+                wl.and_then(|w| w.counts)
+                    .or(if secs == 60 { plan_rpm } else { None });
             let tokens_limit = wl.and_then(|w| w.tokens);
             let costs_limit = wl.and_then(|w| w.costs);
 
@@ -212,12 +220,14 @@ pub async fn get_usage(
     let total_cost_micros = state
         .limiter
         .peek_cumulative(&key_scope, boom_limiter::CumulativeKind::TotalCost);
-    let regular_input_cost_micros = state
-        .limiter
-        .peek_cumulative(&key_scope, boom_limiter::CumulativeKind::TotalRegularInputCost);
-    let cached_input_cost_micros = state
-        .limiter
-        .peek_cumulative(&key_scope, boom_limiter::CumulativeKind::TotalCachedInputCost);
+    let regular_input_cost_micros = state.limiter.peek_cumulative(
+        &key_scope,
+        boom_limiter::CumulativeKind::TotalRegularInputCost,
+    );
+    let cached_input_cost_micros = state.limiter.peek_cumulative(
+        &key_scope,
+        boom_limiter::CumulativeKind::TotalCachedInputCost,
+    );
     let output_cost_micros = state
         .limiter
         .peek_cumulative(&key_scope, boom_limiter::CumulativeKind::TotalOutputCost);
@@ -260,6 +270,7 @@ pub async fn get_key_info(
         None => return Json(json!({"error": "Database not available"})),
     };
 
+    #[allow(clippy::type_complexity)]
     let row: Option<(
         Option<String>,
         Option<String>,
@@ -284,21 +295,31 @@ pub async fn get_key_info(
     .unwrap_or(None);
 
     match row {
-        Some((key_name, key_alias, _spend, expires, blocked, rpm_limit, tpm_limit, max_budget, budget_duration, metadata, created_at)) => {
+        Some((
+            key_name,
+            key_alias,
+            _spend,
+            expires,
+            blocked,
+            rpm_limit,
+            tpm_limit,
+            max_budget,
+            budget_duration,
+            metadata,
+            created_at,
+        )) => {
             // Query token usage from LiteLLM_SpendLogs (may not exist in all deployments).
             let (input_tokens, output_tokens) = query_token_usage(db_pool, key_hash).await;
 
             // Total cost across the key's lifetime — from limiter.cumulative
             // (boom_rate_limit_cumulative backed), NOT boom_verification_token.spend
             // (litellm legacy column we never write, always 0).
-            let total_cost_micros = state
-                .limiter
-                .peek_cumulative(
-                    &boom_limiter::QuotaScope::Key {
-                        key_hash: key_hash.to_string(),
-                    },
-                    boom_limiter::CumulativeKind::TotalCost,
-                );
+            let total_cost_micros = state.limiter.peek_cumulative(
+                &boom_limiter::QuotaScope::Key {
+                    key_hash: key_hash.to_string(),
+                },
+                boom_limiter::CumulativeKind::TotalCost,
+            );
             let total_cost = rust_decimal::Decimal::from(total_cost_micros)
                 / rust_decimal::Decimal::from(1_000_000);
 
@@ -326,10 +347,7 @@ pub async fn get_key_info(
 
 /// Query aggregated token usage from our own boom_request_log table.
 /// Returns (input, output) token counts.
-async fn query_token_usage(
-    pool: &sqlx::PgPool,
-    key_hash: &str,
-) -> (Option<i64>, Option<i64>) {
+async fn query_token_usage(pool: &sqlx::PgPool, key_hash: &str) -> (Option<i64>, Option<i64>) {
     let row: (i64, i64) = sqlx::query_as(
         r#"SELECT COALESCE(SUM(input_tokens), 0)::BIGINT,
                   COALESCE(SUM(output_tokens), 0)::BIGINT
@@ -353,8 +371,12 @@ pub struct UserLogsQuery {
     pub per_page: i64,
 }
 
-fn default_page() -> i64 { 1 }
-fn default_per_page() -> i64 { 50 }
+fn default_page() -> i64 {
+    1
+}
+fn default_per_page() -> i64 {
+    50
+}
 
 #[derive(Debug, sqlx::FromRow)]
 struct UserLogRow {
@@ -404,17 +426,20 @@ pub async fn get_user_logs(
         Ok(r) => r,
         Err(e) => {
             tracing::error!("User get_user_logs query failed: {}", e);
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal error",
+            )
+                .into_response();
         }
     };
 
-    let total: i64 = sqlx::query_scalar(
-        r#"SELECT COUNT(*) FROM boom_request_log WHERE key_hash = $1"#,
-    )
-    .bind(key_hash)
-    .fetch_one(db_pool)
-    .await
-    .unwrap_or(0);
+    let total: i64 =
+        sqlx::query_scalar(r#"SELECT COUNT(*) FROM boom_request_log WHERE key_hash = $1"#)
+            .bind(key_hash)
+            .fetch_one(db_pool)
+            .await
+            .unwrap_or(0);
 
     let logs: Vec<Value> = rows
         .into_iter()
@@ -471,8 +496,14 @@ pub async fn get_request_status(
                 UserRequestStage::Waiting { ahead } => {
                     map.insert("ahead".to_string(), json!(*ahead));
                 }
-                UserRequestStage::Processing { processing_secs, parallel_count } => {
-                    map.insert("processing_secs".to_string(), json!((*processing_secs * 10.0).round() / 10.0));
+                UserRequestStage::Processing {
+                    processing_secs,
+                    parallel_count,
+                } => {
+                    map.insert(
+                        "processing_secs".to_string(),
+                        json!((*processing_secs * 10.0).round() / 10.0),
+                    );
                     map.insert("parallel_count".to_string(), json!(*parallel_count));
                 }
             }
@@ -482,4 +513,3 @@ pub async fn get_request_status(
 
     Json(json!({"requests": requests}))
 }
-

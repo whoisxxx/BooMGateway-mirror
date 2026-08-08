@@ -70,10 +70,7 @@ impl DebugErrorStore {
         self.entries.insert(request_id.clone(), entry);
 
         // Update key index.
-        let mut ids = self
-            .key_index
-            .entry(key_hash.clone())
-            .or_insert_with(VecDeque::new);
+        let mut ids = self.key_index.entry(key_hash.clone()).or_default();
 
         ids.push_back(request_id.clone());
 
@@ -111,6 +108,11 @@ impl DebugErrorStore {
     /// Total number of stored entries.
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Whether there are no stored entries.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 }
 

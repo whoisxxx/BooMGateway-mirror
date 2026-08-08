@@ -36,7 +36,11 @@ pub struct WorkflowModelInstanceConfig {
 
 impl WorkflowSettings {
     pub fn validate(&self, config: &Config) -> Result<(), GatewayError> {
-        let workflow_model_names = self.models.keys().map(String::as_str).collect::<HashSet<_>>();
+        let workflow_model_names = self
+            .models
+            .keys()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
         let mut available_models = config
             .model_list
             .iter()

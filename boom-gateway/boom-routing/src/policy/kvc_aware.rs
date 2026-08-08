@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::inflight::InFlightTracker;
-use crate::rebalance::RebalanceMoveTracker;
 use super::load_helpers::{deployment_load, should_rebalance};
 use super::{SchedulePolicy, Selection};
+use crate::inflight::InFlightTracker;
+use crate::rebalance::RebalanceMoveTracker;
 
 /// KV-cache aware scheduling policy (self-contained, no vLLM event dependency).
 ///
@@ -142,8 +142,14 @@ impl SchedulePolicy for KvcAwarePolicy {
                 routed_worker = ?provider.as_ref().and_then(|p| p.kv_worker_id().map(|s| s.to_string())),
                 "KVC empty prefix, fallback to lowest_load"
             );
-            return provider
-                .map(|provider| Selection { provider, kv_hit_ratio: 0.0, kv_hit_blocks: 0, kv_input_blocks: 0, kv_match_attempted: false, degraded: true });
+            return provider.map(|provider| Selection {
+                provider,
+                kv_hit_ratio: 0.0,
+                kv_hit_blocks: 0,
+                kv_input_blocks: 0,
+                kv_match_attempted: false,
+                degraded: true,
+            });
         }
 
         // Collect worker IDs (derived from each deployment's api_base host)
@@ -154,9 +160,20 @@ impl SchedulePolicy for KvcAwarePolicy {
             .collect();
 
         if cand_worker_ids.is_empty() {
-            tracing::debug!(model, "no kv_worker_id on candidates, fallback to lowest-load");
-            return select_lowest_load(&self.tracker, &self.queue_info, model, candidates)
-                .map(|provider| Selection { provider, kv_hit_ratio: 0.0, kv_hit_blocks: 0, kv_input_blocks: 0, kv_match_attempted: false, degraded: false });
+            tracing::debug!(
+                model,
+                "no kv_worker_id on candidates, fallback to lowest-load"
+            );
+            return select_lowest_load(&self.tracker, &self.queue_info, model, candidates).map(
+                |provider| Selection {
+                    provider,
+                    kv_hit_ratio: 0.0,
+                    kv_hit_blocks: 0,
+                    kv_input_blocks: 0,
+                    kv_match_attempted: false,
+                    degraded: false,
+                },
+            );
         }
 
         // Expand each candidate to its KV-sharing group (peers whose cache is
@@ -176,7 +193,9 @@ impl SchedulePolicy for KvcAwarePolicy {
         // Query KV index for prefix matches across the candidate workers AND
         // their shared-cache peers. Used only to read per-worker affinity
         // (hit_ratio / depth); scoring is done below on the unified axis.
-        let matches = self.kv_index.find_matches(model, prefix_bytes, &query_worker_ids);
+        let matches = self
+            .kv_index
+            .find_matches(model, prefix_bytes, &query_worker_ids);
 
         // worker_id → best hit_ratio / matched depth reported for it (matched
         // workers only). Depth (matched block layers) is surfaced in the
@@ -217,8 +236,8 @@ impl SchedulePolicy for KvcAwarePolicy {
                     let mut best_hit = hit_by_worker.get(w).copied().unwrap_or(0.0);
                     let mut best_depth = depth_by_worker.get(w).copied().unwrap_or(0);
                     for peer in self.query_workers_for(w) {
-                        best_hit = best_hit
-                            .max(hit_by_worker.get(peer.as_str()).copied().unwrap_or(0.0));
+                        best_hit =
+                            best_hit.max(hit_by_worker.get(peer.as_str()).copied().unwrap_or(0.0));
                         best_depth = best_depth
                             .max(depth_by_worker.get(peer.as_str()).copied().unwrap_or(0));
                     }
@@ -228,9 +247,7 @@ impl SchedulePolicy for KvcAwarePolicy {
 
             let load_pct = deployment_load(&self.tracker, &self.queue_info, model, cand.as_ref());
             if self.overload_threshold_pct < 100 && load_pct >= self.overload_threshold_pct {
-                overloaded.push(
-                    cand.kv_worker_id().unwrap_or("?").to_string(),
-                );
+                overloaded.push(cand.kv_worker_id().unwrap_or("?").to_string());
                 continue;
             }
             let load_avail = 1.0 - (load_pct.min(100) as f64 / 100.0);
@@ -254,8 +271,14 @@ impl SchedulePolicy for KvcAwarePolicy {
                 routed = ?picked.as_ref().and_then(|p| p.kv_worker_id().map(|s| s.to_string())),
                 "all candidates overloaded, fallback to lowest-load"
             );
-            return picked
-                .map(|provider| Selection { provider, kv_hit_ratio: 0.0, kv_hit_blocks: 0, kv_input_blocks: request_total_blocks, kv_match_attempted: true, degraded: false });
+            return picked.map(|provider| Selection {
+                provider,
+                kv_hit_ratio: 0.0,
+                kv_hit_blocks: 0,
+                kv_input_blocks: request_total_blocks,
+                kv_match_attempted: true,
+                degraded: false,
+            });
         }
 
         // Pick the top score; round-robin among exact ties so equal-score

@@ -18,7 +18,9 @@ pub struct DeploymentHealthStore {
 }
 
 impl DeploymentHealthStore {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     fn record_online_success(&self, deployment_id: &str) {
         self.counters
@@ -61,10 +63,16 @@ impl DeploymentHealthStore {
         entry.last_error = Some(error);
     }
 
-    pub fn clear(&self, deployment_id: &str) { self.counters.remove(deployment_id); }
+    pub fn clear(&self, deployment_id: &str) {
+        self.counters.remove(deployment_id);
+    }
 }
 
-pub fn record_request_failure(state: &AppState, deployment_id: &Option<String>, error: &boom_core::GatewayError) {
+pub fn record_request_failure(
+    state: &AppState,
+    deployment_id: &Option<String>,
+    error: &boom_core::GatewayError,
+) {
     let cfg = &state.inner.load().config.deployment_health_check;
     if !cfg.request_failure_auto_offline_enabled || !error.is_deployment_failure() {
         return;
@@ -72,7 +80,8 @@ pub fn record_request_failure(state: &AppState, deployment_id: &Option<String>, 
 
     if let Some(ref did) = deployment_id {
         let threshold = cfg.request_failure_threshold.max(1);
-        let counter = state.request_failure_counter
+        let counter = state
+            .request_failure_counter
             .entry(did.clone())
             .or_insert_with(|| std::sync::atomic::AtomicU32::new(0));
         let count = counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -134,7 +143,13 @@ async fn run_offline_checker(state: AppState, mut shutdown: tokio::sync::broadca
     loop {
         let sleep_for = {
             let inner = state.inner.load();
-            Duration::from_secs(inner.config.deployment_health_check.offline_check_interval_secs.max(1))
+            Duration::from_secs(
+                inner
+                    .config
+                    .deployment_health_check
+                    .offline_check_interval_secs
+                    .max(1),
+            )
         };
 
         tokio::select! {
@@ -150,7 +165,9 @@ async fn run_offline_checker(state: AppState, mut shutdown: tokio::sync::broadca
             continue;
         }
 
-        let Some(pool) = state.db_pool.as_ref() else { continue; };
+        let Some(pool) = state.db_pool.as_ref() else {
+            continue;
+        };
 
         let targets = match boom_routing::DeploymentStore::list_health_check_targets(pool).await {
             Ok(targets) => targets,
@@ -167,9 +184,13 @@ async fn run_offline_checker(state: AppState, mut shutdown: tokio::sync::broadca
             };
 
             match probe(&client, &url).await {
-                Ok(()) => state.deployment_health.record_online_success(&target.deployment_id),
+                Ok(()) => state
+                    .deployment_health
+                    .record_online_success(&target.deployment_id),
                 Err(e) => {
-                    let count = state.deployment_health.record_online_failure(&target.deployment_id, e.clone());
+                    let count = state
+                        .deployment_health
+                        .record_online_failure(&target.deployment_id, e.clone());
                     tracing::warn!(
                         deployment_id = %target.deployment_id,
                         model = %target.model_name,
@@ -200,7 +221,13 @@ async fn run_recovery_checker(state: AppState, mut shutdown: tokio::sync::broadc
     loop {
         let sleep_for = {
             let inner = state.inner.load();
-            Duration::from_secs(inner.config.deployment_health_check.recovery_check_interval_secs.max(1))
+            Duration::from_secs(
+                inner
+                    .config
+                    .deployment_health_check
+                    .recovery_check_interval_secs
+                    .max(1),
+            )
         };
 
         tokio::select! {
@@ -216,7 +243,9 @@ async fn run_recovery_checker(state: AppState, mut shutdown: tokio::sync::broadc
             continue;
         }
 
-        let Some(pool) = state.db_pool.as_ref() else { continue; };
+        let Some(pool) = state.db_pool.as_ref() else {
+            continue;
+        };
 
         let targets = match boom_routing::DeploymentStore::list_health_check_targets(pool).await {
             Ok(targets) => targets,
@@ -226,7 +255,10 @@ async fn run_recovery_checker(state: AppState, mut shutdown: tokio::sync::broadc
             }
         };
 
-        for target in targets.into_iter().filter(|t| !t.enabled.unwrap_or(true) && t.auto_disabled.unwrap_or(false)) {
+        for target in targets
+            .into_iter()
+            .filter(|t| !t.enabled.unwrap_or(true) && t.auto_disabled.unwrap_or(false))
+        {
             let Some(url) = health_url(&target, &cfg.path) else {
                 tracing::debug!(deployment_id = %target.deployment_id, "Skipping recovery check target without api_base");
                 continue;
@@ -234,7 +266,9 @@ async fn run_recovery_checker(state: AppState, mut shutdown: tokio::sync::broadc
 
             match probe(&client, &url).await {
                 Ok(()) => {
-                    let count = state.deployment_health.record_recovery_success(&target.deployment_id);
+                    let count = state
+                        .deployment_health
+                        .record_recovery_success(&target.deployment_id);
                     tracing::info!(
                         deployment_id = %target.deployment_id,
                         model = %target.model_name,
@@ -252,7 +286,9 @@ async fn run_recovery_checker(state: AppState, mut shutdown: tokio::sync::broadc
                         state.request_failure_counter.remove(&target.deployment_id);
                     }
                 }
-                Err(e) => state.deployment_health.record_recovery_failure(&target.deployment_id, e),
+                Err(e) => state
+                    .deployment_health
+                    .record_recovery_failure(&target.deployment_id, e),
             }
         }
     }
@@ -270,7 +306,11 @@ fn health_client() -> reqwest::Client {
 fn health_url(target: &DeploymentHealthTarget, path: &str) -> Option<String> {
     let api_base = target.api_base.as_ref()?.trim_end_matches('/');
     let base = api_base.strip_suffix("/v1").unwrap_or(api_base);
-    let path = if path.starts_with('/') { path.to_string() } else { format!("/{}", path) };
+    let path = if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{}", path)
+    };
     Some(format!("{}{}", base, path))
 }
 

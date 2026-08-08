@@ -1,7 +1,7 @@
+use async_trait::async_trait;
 use boom_core::provider::Provider;
 use boom_core::types::*;
 use boom_core::GatewayError;
-use async_trait::async_trait;
 use futures::stream::StreamExt;
 use reqwest::Client;
 use tokio_stream::wrappers::ReceiverStream;
@@ -30,8 +30,7 @@ impl OpenAIProvider {
         Self {
             client,
             api_key,
-            base_url: api_base
-                .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
+            base_url: api_base.unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
             model: model.to_string(),
             deployment_id,
             kv_worker_id,
@@ -51,7 +50,9 @@ impl OpenAIProvider {
             if let MessageContent::Parts(parts) = &mut msg.content {
                 for part in parts.iter_mut() {
                     if let ContentPart::Reasoning { reasoning } = part {
-                        *part = ContentPart::Text { text: std::mem::take(reasoning) };
+                        *part = ContentPart::Text {
+                            text: std::mem::take(reasoning),
+                        };
                     }
                 }
             }
@@ -76,7 +77,10 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl Provider for OpenAIProvider {
-    async fn chat(&self, mut req: ChatCompletionRequest) -> Result<ChatCompletionResponse, GatewayError> {
+    async fn chat(
+        &self,
+        mut req: ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse, GatewayError> {
         // Take gateway-internal headers out before the request is serialized.
         let gateway_headers = std::mem::take(&mut req.gateway_headers);
         let body = self.build_request(req);
@@ -90,14 +94,10 @@ impl Provider for OpenAIProvider {
             builder = builder.header(name, value);
         }
 
-        let resp = builder
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("OpenAI request failed: {}", e);
-                GatewayError::ProviderError("Upstream provider unavailable".to_string())
-            })?;
+        let resp = builder.json(&body).send().await.map_err(|e| {
+            tracing::error!("OpenAI request failed: {}", e);
+            GatewayError::ProviderError("Upstream provider unavailable".to_string())
+        })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -122,7 +122,10 @@ impl Provider for OpenAIProvider {
         Ok(parsed)
     }
 
-    async fn chat_stream(&self, mut req: ChatCompletionRequest) -> Result<ChatStream, GatewayError> {
+    async fn chat_stream(
+        &self,
+        mut req: ChatCompletionRequest,
+    ) -> Result<ChatStream, GatewayError> {
         // Take gateway-internal headers out before the request is serialized.
         let gateway_headers = std::mem::take(&mut req.gateway_headers);
         let mut body = self.build_request(req);
@@ -145,14 +148,10 @@ impl Provider for OpenAIProvider {
             builder = builder.header(name, value);
         }
 
-        let resp = builder
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("OpenAI stream request failed: {}", e);
-                GatewayError::ProviderError("Upstream provider unavailable".to_string())
-            })?;
+        let resp = builder.json(&body).send().await.map_err(|e| {
+            tracing::error!("OpenAI stream request failed: {}", e);
+            GatewayError::ProviderError("Upstream provider unavailable".to_string())
+        })?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -250,7 +249,7 @@ impl Provider for OpenAIProvider {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use wiremock::matchers::{method, path, header};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     /// Build a minimal request, optionally carrying gateway-internal headers.

@@ -50,7 +50,10 @@ impl PromptLogWriter {
     /// Send an entry to the background writer (non-blocking, fire-and-forget).
     pub fn send(&self, entry: PromptLogEntry) {
         if let Err(e) = self.sender.send(entry) {
-            tracing::warn!("Prompt log channel closed, dropping entry: {}", e.0.request_id);
+            tracing::warn!(
+                "Prompt log channel closed, dropping entry: {}",
+                e.0.request_id
+            );
         }
     }
 
@@ -119,7 +122,8 @@ async fn background_writer(
 
                 // Compress stale .jsonl files left over from a crash.
                 if !stale.is_empty() {
-                    let stale_paths: Vec<PathBuf> = stale.iter()
+                    let stale_paths: Vec<PathBuf> = stale
+                        .iter()
                         .map(|s| key_dir.join(format!("log_{:06}.jsonl", s)))
                         .collect();
                     tokio::spawn(async move {
@@ -143,7 +147,11 @@ async fn background_writer(
                             Ok(m) => m.len(),
                             Err(_) => 0,
                         };
-                        e.insert(OpenFile { file, size, sequence: seq })
+                        e.insert(OpenFile {
+                            file,
+                            size,
+                            sequence: seq,
+                        })
                     }
                     Err(err) => {
                         tracing::error!("Failed to open prompt log file {:?}: {}", path, err);
@@ -166,7 +174,11 @@ async fn background_writer(
                         key_hash = %entry.key_hash,
                         "Rotated prompt log file"
                     );
-                    *of = OpenFile { file, size: 0, sequence: new_seq };
+                    *of = OpenFile {
+                        file,
+                        size: 0,
+                        sequence: new_seq,
+                    };
                     // Compress old file in background — fire-and-forget.
                     tokio::spawn(async move {
                         if let Err(e) = compress_file(&old_path).await {
@@ -175,7 +187,11 @@ async fn background_writer(
                     });
                 }
                 Err(err) => {
-                    tracing::error!("Failed to create new prompt log file {:?}: {}", new_path, err);
+                    tracing::error!(
+                        "Failed to create new prompt log file {:?}: {}",
+                        new_path,
+                        err
+                    );
                     continue;
                 }
             }
@@ -230,7 +246,12 @@ async fn find_max_sequence_and_stale(dir: &std::path::Path) -> (u64, Vec<u64>) {
         }
     }
 
-    let overall_max = jsonl_seqs.iter().copied().chain(gz_seqs.iter().copied()).max().unwrap_or(0);
+    let overall_max = jsonl_seqs
+        .iter()
+        .copied()
+        .chain(gz_seqs.iter().copied())
+        .max()
+        .unwrap_or(0);
     let next_seq = overall_max + 1;
 
     // Stale: .jsonl files that are NOT the newest and don't have a .gz counterpart.
@@ -257,7 +278,7 @@ async fn compress_file(path: &std::path::Path) -> std::io::Result<()> {
         encoder.finish()
     })
     .await
-    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))??;
+    .map_err(std::io::Error::other)??;
 
     tokio::fs::write(&gz_path_clone, &compressed).await?;
     tokio::fs::remove_file(path).await?;

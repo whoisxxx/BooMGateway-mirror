@@ -1,8 +1,8 @@
 use chrono::Timelike;
 use dashmap::DashMap;
 use futures::Stream;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 use std::str::FromStr;
@@ -125,11 +125,8 @@ impl RateLimitPlan {
             .map(|w| w.window_secs)
             .filter(|s| !base_secs.contains(s))
             .collect();
-        let merged = Self::merge_shorthand(
-            self.window_limits.clone(),
-            self.rpm_limit,
-            self.tpm_limit,
-        );
+        let merged =
+            Self::merge_shorthand(self.window_limits.clone(), self.rpm_limit, self.tpm_limit);
         (self.concurrency_limit, merged, stale)
     }
 
@@ -153,8 +150,7 @@ impl RateLimitPlan {
             .iter()
             .any(|w| w.window_secs == 60 && w.tokens.is_some());
 
-        let need_new_60s = rpm.is_some() && !has_60s_counts
-            || tpm.is_some() && !has_60s_tokens;
+        let need_new_60s = rpm.is_some() && !has_60s_counts || tpm.is_some() && !has_60s_tokens;
         if !need_new_60s {
             return windows;
         }
@@ -206,11 +202,9 @@ impl RateLimitPlan {
                 let (j, b_start, b_end) = ranges[b];
                 let a_ranges = expand_range(a_start, a_end);
                 let b_ranges = expand_range(b_start, b_end);
-                let overlap = a_ranges.iter().any(|ra| {
-                    b_ranges
-                        .iter()
-                        .any(|rb| ra.0.max(rb.0) < ra.1.min(rb.1))
-                });
+                let overlap = a_ranges
+                    .iter()
+                    .any(|ra| b_ranges.iter().any(|rb| ra.0.max(rb.0) < ra.1.min(rb.1)));
                 if overlap {
                     return Err(format!(
                         "schedule slots {} and {} overlap in time",
@@ -264,9 +258,8 @@ impl ScheduleSlot {
             Some(pair) => pair,
             None => return false,
         };
-        let now = chrono::Utc::now().with_timezone(
-            &chrono::FixedOffset::east_opt(8 * 3600).unwrap(),
-        );
+        let now =
+            chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap());
         let current_min = now.hour() * 60 + now.minute();
         if start_min <= end_min {
             // Same day: e.g. 9:00-21:00
@@ -413,7 +406,9 @@ impl PlanStore {
 
     /// Get the plan name assigned to a team (for display purposes).
     pub fn get_team_plan_name(&self, team_id: &str) -> Option<String> {
-        self.team_assignments.get(team_id).map(|n| n.value().clone())
+        self.team_assignments
+            .get(team_id)
+            .map(|n| n.value().clone())
     }
 
     /// Get the effective plan name for a team — explicit assignment if any,
@@ -524,8 +519,7 @@ impl PlanStore {
     /// does NOT fall back to default_plan at runtime. The user has actively
     /// opted out of plan-based limits.
     pub fn assign_key_no_plan(&self, key_hash: &str) {
-        self.key_assignments
-            .insert(key_hash.to_string(), None);
+        self.key_assignments.insert(key_hash.to_string(), None);
     }
 
     pub fn unassign_key(&self, key_hash: &str) -> bool {
@@ -662,11 +656,10 @@ impl PlanStore {
     /// "no plan" assignments (Some(None)) are preserved — the user opted out
     /// of plan-based limits and that intent survives reloads.
     pub fn cleanup_assignments(&self) {
-        self.key_assignments
-            .retain(|_, explicit| match explicit {
-                None => true,                  // explicit "no plan" — keep
-                Some(name) => self.plans.contains_key(name),
-            });
+        self.key_assignments.retain(|_, explicit| match explicit {
+            None => true, // explicit "no plan" — keep
+            Some(name) => self.plans.contains_key(name),
+        });
         self.team_assignments
             .retain(|_, plan_name| self.plans.contains_key(plan_name));
     }
@@ -675,12 +668,10 @@ impl PlanStore {
     /// Returns the count of removed entries.
     pub fn cleanup_concurrency(&self) -> usize {
         let before = self.key_concurrency_counters.len() + self.team_concurrency_counters.len();
-        self.key_concurrency_counters.retain(|_, counter| {
-            counter.load(Ordering::Relaxed) > 0
-        });
-        self.team_concurrency_counters.retain(|_, counter| {
-            counter.load(Ordering::Relaxed) > 0
-        });
+        self.key_concurrency_counters
+            .retain(|_, counter| counter.load(Ordering::Relaxed) > 0);
+        self.team_concurrency_counters
+            .retain(|_, counter| counter.load(Ordering::Relaxed) > 0);
         let after = self.key_concurrency_counters.len() + self.team_concurrency_counters.len();
         before - after
     }
@@ -739,7 +730,10 @@ impl PlanStore {
             .execute(pool)
             .await?;
             if result.rows_affected() > 0 {
-                tracing::info!("Removed {} conflicting source='db' plan(s)", result.rows_affected());
+                tracing::info!(
+                    "Removed {} conflicting source='db' plan(s)",
+                    result.rows_affected()
+                );
             }
         }
 
@@ -747,16 +741,25 @@ impl PlanStore {
         for (name, pc) in yaml_plans {
             let wl = serde_json::to_value(&pc.window_limits).unwrap_or(serde_json::json!([]));
             let schedule_json = serde_json::to_value(
-                pc.schedule.iter().map(|s| serde_json::json!({
-                    "hours": s.hours,
-                    "concurrency_limit": s.concurrency_limit,
-                    "rpm_limit": s.rpm_limit,
-                    "tpm_limit": s.tpm_limit,
-                    "window_limits": s.window_limits,
-                })).collect::<Vec<_>>(),
-            ).unwrap_or(serde_json::json!([]));
+                pc.schedule
+                    .iter()
+                    .map(|s| {
+                        serde_json::json!({
+                            "hours": s.hours,
+                            "concurrency_limit": s.concurrency_limit,
+                            "rpm_limit": s.rpm_limit,
+                            "tpm_limit": s.tpm_limit,
+                            "window_limits": s.window_limits,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or(serde_json::json!([]));
             let is_default = default_plan_name == Some(name.as_str());
-            let type_str = match pc.r#type { PlanType::Key => "key", PlanType::Team => "team" };
+            let type_str = match pc.r#type {
+                PlanType::Key => "key",
+                PlanType::Team => "team",
+            };
 
             sqlx::query(
                 r#"INSERT INTO boom_rate_limit_plan
@@ -873,20 +876,33 @@ impl PlanStore {
     }
 
     /// Upsert a plan in DB (source='db') and update memory.
-    pub async fn upsert_plan_db(&self, pool: &sqlx::PgPool, plan: &RateLimitPlan) -> Result<(), sqlx::Error> {
+    pub async fn upsert_plan_db(
+        &self,
+        pool: &sqlx::PgPool,
+        plan: &RateLimitPlan,
+    ) -> Result<(), sqlx::Error> {
         let wl = serde_json::to_value(&plan.window_limits).unwrap_or(serde_json::json!([]));
         let schedule_json = serde_json::to_value(
-            plan.schedule.iter().map(|s| serde_json::json!({
-                "hours": s.hours,
-                "concurrency_limit": s.concurrency_limit,
-                "rpm_limit": s.rpm_limit,
-                "tpm_limit": s.tpm_limit,
-                "window_limits": s.window_limits,
-            })).collect::<Vec<_>>(),
-        ).unwrap_or(serde_json::json!([]));
+            plan.schedule
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "hours": s.hours,
+                        "concurrency_limit": s.concurrency_limit,
+                        "rpm_limit": s.rpm_limit,
+                        "tpm_limit": s.tpm_limit,
+                        "window_limits": s.window_limits,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or(serde_json::json!([]));
 
         let name = &plan.name;
-        let type_str = match plan.r#type { PlanType::Key => "key", PlanType::Team => "team" };
+        let type_str = match plan.r#type {
+            PlanType::Key => "key",
+            PlanType::Team => "team",
+        };
 
         boom_core::gaussdb_upsert!(
             pool,
@@ -938,7 +954,11 @@ impl PlanStore {
     }
 
     /// Delete a plan from DB and memory.
-    pub async fn delete_plan_db(&self, pool: &sqlx::PgPool, name: &str) -> Result<bool, sqlx::Error> {
+    pub async fn delete_plan_db(
+        &self,
+        pool: &sqlx::PgPool,
+        name: &str,
+    ) -> Result<bool, sqlx::Error> {
         let result = sqlx::query(r#"DELETE FROM boom_rate_limit_plan WHERE name = $1"#)
             .bind(name)
             .execute(pool)
@@ -958,7 +978,12 @@ impl PlanStore {
     /// cannot dirty the `boom_key_plan_assignment` table. The in-memory
     /// `assign_key` call after the DB write is a no-op type-wise (already
     /// validated); it just applies the assignment to memory.
-    pub async fn assign_key_db(&self, pool: &sqlx::PgPool, key_hash: &str, plan_name: &str) -> Result<(), String> {
+    pub async fn assign_key_db(
+        &self,
+        pool: &sqlx::PgPool,
+        key_hash: &str,
+        plan_name: &str,
+    ) -> Result<(), String> {
         self.validate_plan_for_key(plan_name, key_hash)?;
         // GaussDB-compatible upsert: UPDATE → INSERT → UPDATE (no ON CONFLICT support).
         let updated = sqlx::query(
@@ -969,8 +994,8 @@ impl PlanStore {
         .execute(pool)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
-        if updated.rows_affected() == 0 {
-            if let Err(_) = sqlx::query(
+        if updated.rows_affected() == 0
+            && sqlx::query(
                 r#"INSERT INTO boom_key_plan_assignment (key_hash, plan_name, assigned_at)
                    VALUES ($1, $2, NOW())"#,
             )
@@ -978,16 +1003,16 @@ impl PlanStore {
             .bind(plan_name)
             .execute(pool)
             .await
-            {
-                sqlx::query(
-                    r#"UPDATE boom_key_plan_assignment SET plan_name = $2 WHERE key_hash = $1"#,
-                )
-                .bind(key_hash)
-                .bind(plan_name)
-                .execute(pool)
-                .await
-                .map_err(|e| format!("DB error: {}", e))?;
-            }
+            .is_err()
+        {
+            sqlx::query(
+                r#"UPDATE boom_key_plan_assignment SET plan_name = $2 WHERE key_hash = $1"#,
+            )
+            .bind(key_hash)
+            .bind(plan_name)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
         }
 
         // DB succeeded — now safe to update memory.
@@ -999,6 +1024,7 @@ impl PlanStore {
     /// `unassign_key_db`: this writes a row with `plan_name IS NULL` so the
     /// runtime knows the user actively opted out of plan-based limits, and
     /// must NOT fall back to default_plan.
+    #[allow(clippy::collapsible_if)]
     pub async fn assign_key_no_plan_db(
         &self,
         pool: &sqlx::PgPool,
@@ -1011,23 +1037,23 @@ impl PlanStore {
         .execute(pool)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
-        if updated.rows_affected() == 0 {
-            if let Err(_) = sqlx::query(
+        if updated.rows_affected() == 0
+            && sqlx::query(
                 r#"INSERT INTO boom_key_plan_assignment (key_hash, plan_name, assigned_at)
                    VALUES ($1, NULL, NOW())"#,
             )
             .bind(key_hash)
             .execute(pool)
             .await
-            {
-                sqlx::query(
-                    r#"UPDATE boom_key_plan_assignment SET plan_name = NULL WHERE key_hash = $1"#,
-                )
-                .bind(key_hash)
-                .execute(pool)
-                .await
-                .map_err(|e| format!("DB error: {}", e))?;
-            }
+            .is_err()
+        {
+            sqlx::query(
+                r#"UPDATE boom_key_plan_assignment SET plan_name = NULL WHERE key_hash = $1"#,
+            )
+            .bind(key_hash)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
         }
 
         self.assign_key_no_plan(key_hash);
@@ -1035,7 +1061,11 @@ impl PlanStore {
     }
 
     /// Unassign a key from its plan in DB and memory.
-    pub async fn unassign_key_db(&self, pool: &sqlx::PgPool, key_hash: &str) -> Result<bool, String> {
+    pub async fn unassign_key_db(
+        &self,
+        pool: &sqlx::PgPool,
+        key_hash: &str,
+    ) -> Result<bool, String> {
         let result = sqlx::query(r#"DELETE FROM boom_key_plan_assignment WHERE key_hash = $1"#)
             .bind(key_hash)
             .execute(pool)
@@ -1054,7 +1084,13 @@ impl PlanStore {
     ///
     /// Type check runs first — before any DB write — so a type=key plan
     /// cannot dirty the `boom_team_plan_assignment` table.
-    pub async fn assign_team_db(&self, pool: &sqlx::PgPool, team_id: &str, plan_name: &str) -> Result<(), String> {
+    #[allow(clippy::collapsible_if)]
+    pub async fn assign_team_db(
+        &self,
+        pool: &sqlx::PgPool,
+        team_id: &str,
+        plan_name: &str,
+    ) -> Result<(), String> {
         self.validate_plan_for_team(plan_name, team_id)?;
         let updated = sqlx::query(
             r#"UPDATE boom_team_plan_assignment SET plan_name = $2 WHERE team_id = $1"#,
@@ -1064,8 +1100,8 @@ impl PlanStore {
         .execute(pool)
         .await
         .map_err(|e| format!("DB error: {}", e))?;
-        if updated.rows_affected() == 0 {
-            if let Err(_) = sqlx::query(
+        if updated.rows_affected() == 0
+            && sqlx::query(
                 r#"INSERT INTO boom_team_plan_assignment (team_id, plan_name, assigned_at)
                    VALUES ($1, $2, NOW())"#,
             )
@@ -1073,23 +1109,27 @@ impl PlanStore {
             .bind(plan_name)
             .execute(pool)
             .await
-            {
-                sqlx::query(
-                    r#"UPDATE boom_team_plan_assignment SET plan_name = $2 WHERE team_id = $1"#,
-                )
-                .bind(team_id)
-                .bind(plan_name)
-                .execute(pool)
-                .await
-                .map_err(|e| format!("DB error: {}", e))?;
-            }
+            .is_err()
+        {
+            sqlx::query(
+                r#"UPDATE boom_team_plan_assignment SET plan_name = $2 WHERE team_id = $1"#,
+            )
+            .bind(team_id)
+            .bind(plan_name)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("DB error: {}", e))?;
         }
         self.apply_team_assignment(team_id, plan_name);
         Ok(())
     }
 
     /// Unassign a team from its plan in DB and memory.
-    pub async fn unassign_team_db(&self, pool: &sqlx::PgPool, team_id: &str) -> Result<bool, String> {
+    pub async fn unassign_team_db(
+        &self,
+        pool: &sqlx::PgPool,
+        team_id: &str,
+    ) -> Result<bool, String> {
         let result = sqlx::query(r#"DELETE FROM boom_team_plan_assignment WHERE team_id = $1"#)
             .bind(team_id)
             .execute(pool)
@@ -1126,7 +1166,10 @@ impl PlanStore {
     }
 
     /// Sync in-memory team assignments to DB (periodic background task).
-    pub async fn sync_team_assignments_to_db(&self, pool: &sqlx::PgPool) -> Result<(), sqlx::Error> {
+    pub async fn sync_team_assignments_to_db(
+        &self,
+        pool: &sqlx::PgPool,
+    ) -> Result<(), sqlx::Error> {
         let assignments = self.snapshot_team_assignments();
         for (team_id, plan_name) in &assignments {
             boom_core::gaussdb_upsert!(
@@ -1241,7 +1284,10 @@ fn parse_window_limits(value: &serde_json::Value) -> Vec<WindowLimit> {
                         .and_then(|v| v.as_f64())
                         .and_then(Decimal::from_f64)
                 });
-            let window_secs = obj.get("window_secs").and_then(|v| v.as_u64()).unwrap_or(60);
+            let window_secs = obj
+                .get("window_secs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(60);
             out.push(WindowLimit {
                 counts,
                 tokens,
@@ -1254,25 +1300,31 @@ fn parse_window_limits(value: &serde_json::Value) -> Vec<WindowLimit> {
 }
 
 fn parse_schedule(value: &serde_json::Value) -> Vec<ScheduleSlot> {
-    value.as_array().map(|arr| {
-        arr.iter().filter_map(|item| {
-            let obj = item.as_object()?;
-            let empty_arr = serde_json::Value::Array(vec![]);
-            let conc = obj.get("concurrency_limit")
-                .and_then(|v| v.as_u64()).map(|v| v as u32);
-            let rpm = obj.get("rpm_limit")
-                .and_then(|v| v.as_u64());
-            let tpm = obj.get("tpm_limit").and_then(|v| v.as_u64());
-            let wl = parse_window_limits(obj.get("window_limits").unwrap_or(&empty_arr));
-            Some(ScheduleSlot {
-                hours: obj.get("hours")?.as_str()?.to_string(),
-                concurrency_limit: conc,
-                rpm_limit: rpm,
-                tpm_limit: tpm,
-                window_limits: wl,
-            })
-        }).collect()
-    }).unwrap_or_default()
+    value
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let obj = item.as_object()?;
+                    let empty_arr = serde_json::Value::Array(vec![]);
+                    let conc = obj
+                        .get("concurrency_limit")
+                        .and_then(|v| v.as_u64())
+                        .map(|v| v as u32);
+                    let rpm = obj.get("rpm_limit").and_then(|v| v.as_u64());
+                    let tpm = obj.get("tpm_limit").and_then(|v| v.as_u64());
+                    let wl = parse_window_limits(obj.get("window_limits").unwrap_or(&empty_arr));
+                    Some(ScheduleSlot {
+                        hours: obj.get("hours")?.as_str()?.to_string(),
+                        concurrency_limit: conc,
+                        rpm_limit: rpm,
+                        tpm_limit: tpm,
+                        window_limits: wl,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // ────────────────────────────────────────────────────────────
@@ -1304,10 +1356,7 @@ pub struct GuardedStream<S> {
 
 impl<S> GuardedStream<S> {
     pub fn new(inner: S, guard: Option<ConcurrencyGuard>) -> Self {
-        Self {
-            inner,
-            guard,
-        }
+        Self { inner, guard }
     }
 }
 
@@ -1533,8 +1582,14 @@ mod tests {
     fn test_schedule_overlap_ok_for_complementary_slots() {
         let mut plan = RateLimitPlan::default_for_test();
         plan.schedule = vec![
-            ScheduleSlot { hours: "9:00-21:00".to_string(), ..Default::default() },
-            ScheduleSlot { hours: "21:00-9:00".to_string(), ..Default::default() },
+            ScheduleSlot {
+                hours: "9:00-21:00".to_string(),
+                ..Default::default()
+            },
+            ScheduleSlot {
+                hours: "21:00-9:00".to_string(),
+                ..Default::default()
+            },
         ];
         assert!(plan.validate_schedule_overlap().is_ok());
     }
@@ -1545,11 +1600,21 @@ mod tests {
     fn test_schedule_overlap_rejects_nested_range() {
         let mut plan = RateLimitPlan::default_for_test();
         plan.schedule = vec![
-            ScheduleSlot { hours: "9:00-21:00".to_string(), ..Default::default() },
-            ScheduleSlot { hours: "10:00-11:00".to_string(), ..Default::default() },
+            ScheduleSlot {
+                hours: "9:00-21:00".to_string(),
+                ..Default::default()
+            },
+            ScheduleSlot {
+                hours: "10:00-11:00".to_string(),
+                ..Default::default()
+            },
         ];
         let err = plan.validate_schedule_overlap().unwrap_err();
-        assert!(err.contains("overlap"), "error must mention overlap: {}", err);
+        assert!(
+            err.contains("overlap"),
+            "error must mention overlap: {}",
+            err
+        );
         // Slot numbers are 1-indexed for user-facing display.
         assert!(err.contains("1") && err.contains("2"));
     }
@@ -1561,9 +1626,18 @@ mod tests {
     fn test_schedule_overlap_rejects_identical_cross_midnight_pair() {
         let mut plan = RateLimitPlan::default_for_test();
         plan.schedule = vec![
-            ScheduleSlot { hours: "21:00-9:00".to_string(), ..Default::default() },
-            ScheduleSlot { hours: "9:00-21:00".to_string(), ..Default::default() },
-            ScheduleSlot { hours: "21:00-9:00".to_string(), ..Default::default() },
+            ScheduleSlot {
+                hours: "21:00-9:00".to_string(),
+                ..Default::default()
+            },
+            ScheduleSlot {
+                hours: "9:00-21:00".to_string(),
+                ..Default::default()
+            },
+            ScheduleSlot {
+                hours: "21:00-9:00".to_string(),
+                ..Default::default()
+            },
         ];
         assert!(plan.validate_schedule_overlap().is_err());
     }

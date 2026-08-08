@@ -10,6 +10,7 @@ use super::KvIndexBackend;
 
 // ── TTL prune timers (priority-heap, O(k log n) pop) ─────────────────────
 
+#[allow(clippy::type_complexity)]
 struct PruneTimers {
     timers: HashMap<(String, String, u64), std::time::Instant>,
     expirations: std::collections::BinaryHeap<
@@ -131,7 +132,8 @@ impl TokenPrefixIndex {
             guard.children.clear();
         }
         drop(guard);
-        self.block_lookup.remove(&(model.to_string(), worker_id.to_string(), hash));
+        self.block_lookup
+            .remove(&(model.to_string(), worker_id.to_string(), hash));
     }
 }
 
@@ -170,14 +172,17 @@ impl KvIndexBackend for TokenPrefixIndex {
                 block_bytes,
                 parent_hash,
                 storage_tier,
-                block_size: _,
                 ..
             } => {
                 if block_bytes.is_empty() {
                     return;
                 }
                 let trie_key = hash_block_bytes(block_bytes);
-                let effective_hash = if *local_hash == 0 { trie_key } else { *local_hash };
+                let effective_hash = if *local_hash == 0 {
+                    trie_key
+                } else {
+                    *local_hash
+                };
                 // Get root Arc — scope-limit the DashMap RefMut to avoid holding
                 // the shard write lock during LRU eviction (which calls tries.get).
                 let root_arc = {
@@ -187,12 +192,15 @@ impl KvIndexBackend for TokenPrefixIndex {
                         .or_insert_with(|| Arc::new(RwLock::new(Block::default())));
                     entry.clone()
                 }; // RefMut dropped — shard lock released
-                // Find parent via block_lookup (O(1)) or fall back to root
+                   // Find parent via block_lookup (O(1)) or fall back to root
                 let parent = match parent_hash {
                     None => root_arc.clone(),
                     Some(ph) => {
                         let key = (model.to_string(), worker_id.clone(), *ph);
-                        self.block_lookup.get(&key).map(|r| r.clone()).unwrap_or_else(|| root_arc.clone())
+                        self.block_lookup
+                            .get(&key)
+                            .map(|r| r.clone())
+                            .unwrap_or_else(|| root_arc.clone())
                     }
                 };
                 let child = {
@@ -288,14 +296,11 @@ impl KvIndexBackend for TokenPrefixIndex {
         }
         let request_hashes: Vec<u64> = (0..n_full)
             .map(|i| {
-                hash_block_bytes(
-                    &prefix_bytes[i * self.block_size..(i + 1) * self.block_size],
-                )
+                hash_block_bytes(&prefix_bytes[i * self.block_size..(i + 1) * self.block_size])
             })
             .collect();
 
-        let candidate_set: HashSet<String> =
-            candidate_worker_ids.iter().cloned().collect();
+        let candidate_set: HashSet<String> = candidate_worker_ids.iter().cloned().collect();
 
         let root = match self.tries.get(model) {
             Some(r) => r.clone(),
@@ -472,7 +477,11 @@ impl KvIndexBackend for TokenPrefixIndex {
                     cs
                 };
                 for (trie_key, child) in &children {
-                    let (workers_list, tier, grandchildren): (Vec<String>, StorageTier, Vec<SharedBlock>) = {
+                    let (workers_list, tier, grandchildren): (
+                        Vec<String>,
+                        StorageTier,
+                        Vec<SharedBlock>,
+                    ) = {
                         let cguard = child.read();
                         let workers: Vec<String> = cguard.workers.keys().cloned().collect();
                         let tier = cguard
@@ -485,13 +494,7 @@ impl KvIndexBackend for TokenPrefixIndex {
                         (workers, tier, gc)
                     };
                     if !workers_list.is_empty() {
-                        result.push((
-                            model.clone(),
-                            *trie_key,
-                            workers_list,
-                            tier,
-                            depth + 1,
-                        ));
+                        result.push((model.clone(), *trie_key, workers_list, tier, depth + 1));
                     }
                     for gc in grandchildren {
                         stack.push((gc, depth + 2));
@@ -526,8 +529,17 @@ impl TokenPrefixIndex {
             .iter()
             .map(|b| {
                 let trie_key = hash_block_bytes(&b.block_bytes);
-                let effective_hash = if b.local_hash == 0 { trie_key } else { b.local_hash };
-                (trie_key, effective_hash, b.block_bytes.clone(), b.storage_tier)
+                let effective_hash = if b.local_hash == 0 {
+                    trie_key
+                } else {
+                    b.local_hash
+                };
+                (
+                    trie_key,
+                    effective_hash,
+                    b.block_bytes.clone(),
+                    b.storage_tier,
+                )
             })
             .collect();
 
@@ -565,7 +577,9 @@ impl TokenPrefixIndex {
             // Phase B: lock child, insert worker + tokens + block_lookup
             {
                 let mut child_guard = child.write();
-                child_guard.workers.insert(worker_id.to_string(), storage_tier);
+                child_guard
+                    .workers
+                    .insert(worker_id.to_string(), storage_tier);
                 if child_guard.tokens.is_empty() {
                     child_guard.tokens = block_bytes.clone();
                 }
@@ -609,7 +623,13 @@ impl TokenPrefixIndex {
 mod tests {
     use super::*;
 
-    fn store_event(model: &str, worker: &str, _hash: u64, parent_hash: Option<u64>, bytes: Vec<u8>) -> GatewayKvEvent {
+    fn store_event(
+        model: &str,
+        worker: &str,
+        _hash: u64,
+        parent_hash: Option<u64>,
+        bytes: Vec<u8>,
+    ) -> GatewayKvEvent {
         // local_hash=0 → effective_hash = trie_key = hash_block_bytes(bytes)
         // This makes parent_hash refer to the parent's trie_key consistently.
         GatewayKvEvent::Store {
@@ -647,7 +667,11 @@ mod tests {
         idx.apply_event(&store_event("m", "w0", 0, None, b1.clone()));
         idx.apply_event(&store_event("m", "w0", 0, Some(h1), b2.clone()));
         idx.apply_event(&store_event("m", "w0", 0, Some(h2), b3.clone()));
-        let matches = idx.find_matches("m", &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], &["w0".to_string()]);
+        let matches = idx.find_matches(
+            "m",
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            &["w0".to_string()],
+        );
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].match_depth, 3);
     }
@@ -669,7 +693,12 @@ mod tests {
     fn test_evict_single_block() {
         let idx = TokenPrefixIndex::new(4, 0.5, 0.2, 500_000);
         // Use record_request_prefix for chain (reliable chain building)
-        idx.record_request_prefix("m", "w0", &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], StorageTier::Gpu);
+        idx.record_request_prefix(
+            "m",
+            "w0",
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            StorageTier::Gpu,
+        );
         // trie_key of block 2 = hash_block_bytes([5,6,7,8])
         let h2 = hash_block_bytes(&[5, 6, 7, 8]);
         idx.apply_event(&GatewayKvEvent::EvictBlocks {
@@ -678,7 +707,11 @@ mod tests {
             block_hashes: vec![h2],
             storage_tier: None,
         });
-        let matches = idx.find_matches("m", &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], &["w0".to_string()]);
+        let matches = idx.find_matches(
+            "m",
+            &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            &["w0".to_string()],
+        );
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].match_depth, 1);
     }
@@ -694,8 +727,12 @@ mod tests {
             storage_tier: None,
         });
         assert_eq!(idx.block_count(), 0);
-        assert!(idx.find_matches("m", &[1, 2, 3, 4], &["w0".to_string()]).is_empty());
-        assert!(idx.find_matches("m2", &[10, 20, 30, 40], &["w0".to_string()]).is_empty());
+        assert!(idx
+            .find_matches("m", &[1, 2, 3, 4], &["w0".to_string()])
+            .is_empty());
+        assert!(idx
+            .find_matches("m2", &[10, 20, 30, 40], &["w0".to_string()])
+            .is_empty());
     }
 
     #[test]

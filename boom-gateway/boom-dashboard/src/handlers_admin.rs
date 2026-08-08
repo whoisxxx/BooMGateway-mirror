@@ -67,23 +67,27 @@ fn generate_key_material(requested_prefix: Option<&str>) -> (String, String, Opt
 fn validate_prefix_and_tag(req: &CreateKeyRequest) -> Option<Response> {
     if let Some(ref p) = req.key_prefix {
         if !p.is_empty() && !is_valid_prefix(p) {
-            return Some((
-                axum::http::StatusCode::BAD_REQUEST,
-                format!(
-                    "Invalid key_prefix '{}': must be 1-8 ASCII alphanumeric chars [a-zA-Z0-9]",
-                    p
-                ),
-            )
-                .into_response());
+            return Some(
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    format!(
+                        "Invalid key_prefix '{}': must be 1-8 ASCII alphanumeric chars [a-zA-Z0-9]",
+                        p
+                    ),
+                )
+                    .into_response(),
+            );
         }
     }
     if let Some(ref tag) = req.tag {
         if tag.chars().count() > MAX_TAG_LEN {
-            return Some((
-                axum::http::StatusCode::BAD_REQUEST,
-                format!("Invalid tag: length must be <= {} chars", MAX_TAG_LEN),
-            )
-                .into_response());
+            return Some(
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    format!("Invalid tag: length must be <= {} chars", MAX_TAG_LEN),
+                )
+                    .into_response(),
+            );
         }
     }
     None
@@ -146,10 +150,7 @@ pub async fn upsert_plan(
     };
 
     if let Err(msg) = plan.validate_schedule_overlap() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": msg })),
-        ));
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))));
     }
 
     // Persist to DB via PlanStore.
@@ -161,7 +162,10 @@ pub async fn upsert_plan(
         state.plan_store.upsert_plan(plan);
     }
 
-    let _ = state.admin_tx.send(crate::state::AdminCommand::ConfigChanged).await;
+    let _ = state
+        .admin_tx
+        .send(crate::state::AdminCommand::ConfigChanged)
+        .await;
     Ok(Json(json!({"ok": true, "plan_name": req.name})))
 }
 
@@ -183,7 +187,10 @@ pub async fn delete_plan(
     };
 
     if deleted {
-        let _ = state.admin_tx.send(crate::state::AdminCommand::ConfigChanged).await;
+        let _ = state
+            .admin_tx
+            .send(crate::state::AdminCommand::ConfigChanged)
+            .await;
     }
 
     Json(json!({"ok": deleted, "plan_name": name}))
@@ -319,7 +326,8 @@ pub async fn list_keys(
         .into_iter()
         .map(|r| {
             let token_prefix = format!("{}...", &r.token[..8.min(r.token.len())]);
-            let (usage_count, usage_reset_secs) = all_usage.get(&r.token).copied().unwrap_or((0, 0));
+            let (usage_count, usage_reset_secs) =
+                all_usage.get(&r.token).copied().unwrap_or((0, 0));
             // Three-state plan assignment. The frontend distinguishes:
             //   - "default"   → no DB row (follows default_plan at runtime)
             //   - "no_plan"   → row with plan_name IS NULL (explicit opt-out)
@@ -346,24 +354,20 @@ pub async fn list_keys(
             let mut cost_min_secs: Option<(u64, u64, u64)> = None; // (secs, micros, remaining)
             for w in state.limiter.peek_key_windows(&r.token) {
                 match w.kind {
-                    boom_limiter::WindowKind::Tokens => {
-                        match tokens_min_secs {
-                            None => tokens_min_secs = Some((w.window_secs, w.count, w.remaining_secs)),
-                            Some((s, _, _)) if w.window_secs < s => {
-                                tokens_min_secs = Some((w.window_secs, w.count, w.remaining_secs));
-                            }
-                            _ => {}
+                    boom_limiter::WindowKind::Tokens => match tokens_min_secs {
+                        None => tokens_min_secs = Some((w.window_secs, w.count, w.remaining_secs)),
+                        Some((s, _, _)) if w.window_secs < s => {
+                            tokens_min_secs = Some((w.window_secs, w.count, w.remaining_secs));
                         }
-                    }
-                    boom_limiter::WindowKind::CostMicros => {
-                        match cost_min_secs {
-                            None => cost_min_secs = Some((w.window_secs, w.count, w.remaining_secs)),
-                            Some((s, _, _)) if w.window_secs < s => {
-                                cost_min_secs = Some((w.window_secs, w.count, w.remaining_secs));
-                            }
-                            _ => {}
+                        _ => {}
+                    },
+                    boom_limiter::WindowKind::CostMicros => match cost_min_secs {
+                        None => cost_min_secs = Some((w.window_secs, w.count, w.remaining_secs)),
+                        Some((s, _, _)) if w.window_secs < s => {
+                            cost_min_secs = Some((w.window_secs, w.count, w.remaining_secs));
                         }
-                    }
+                        _ => {}
+                    },
                 }
             }
             let usage_tokens = tokens_min_secs.map(|(_, c, _)| c).unwrap_or(0);
@@ -374,14 +378,12 @@ pub async fn list_keys(
             // Cumulative total cost across the key's lifetime — comes from
             // limiter.cumulative (boom_rate_limit_cumulative backed), NOT
             // boom_verification_token.spend (litellm legacy column we never write).
-            let total_cost_micros = state
-                .limiter
-                .peek_cumulative(
-                    &boom_limiter::QuotaScope::Key {
-                        key_hash: r.token.clone(),
-                    },
-                    boom_limiter::CumulativeKind::TotalCost,
-                );
+            let total_cost_micros = state.limiter.peek_cumulative(
+                &boom_limiter::QuotaScope::Key {
+                    key_hash: r.token.clone(),
+                },
+                boom_limiter::CumulativeKind::TotalCost,
+            );
             let total_cost = rust_decimal::Decimal::from(total_cost_micros)
                 / rust_decimal::Decimal::from(1_000_000);
 
@@ -445,9 +447,7 @@ pub async fn list_keys(
             "no_plan" => keys.retain(|k| {
                 k.get("plan_assignment_kind").and_then(|v| v.as_str()) == Some("no_plan")
             }),
-            name => keys.retain(|k| {
-                k.get("plan_name").and_then(|v| v.as_str()) == Some(name)
-            }),
+            name => keys.retain(|k| k.get("plan_name").and_then(|v| v.as_str()) == Some(name)),
         }
     }
 
@@ -605,12 +605,15 @@ pub async fn create_key(
             }
         }
         Some(Some(ref plan_name)) => {
-            let is_default = state.plan_store.get_default_plan_name().as_deref()
-                == Some(plan_name.as_str());
+            let is_default =
+                state.plan_store.get_default_plan_name().as_deref() == Some(plan_name.as_str());
             let result = if is_default {
                 state.plan_store.assign_key(&token_hash, plan_name)
             } else {
-                state.plan_store.assign_key_db(db_pool, &token_hash, plan_name).await
+                state
+                    .plan_store
+                    .assign_key_db(db_pool, &token_hash, plan_name)
+                    .await
             };
             if let Err(e) = result {
                 tracing::warn!("Key created but plan assignment failed: {}", e);
@@ -707,11 +710,7 @@ pub async fn update_key(
     // (must exist in boom_team_table), None → leave untouched. We bind the
     // validated Option<&str> separately so SQL `COALESCE($N, team_id)` keeps
     // the old value when client omitted the field.
-    let team_id_resolved: Option<&str> = match req.team_id.as_deref() {
-        None => None,
-        Some("") => Some(""),
-        Some(id) => Some(id),
-    };
+    let team_id_resolved: Option<&str> = req.team_id.as_deref();
     if let Some(id) = team_id_resolved {
         if !id.is_empty() {
             let exists: bool = sqlx::query_scalar(
@@ -773,11 +772,7 @@ pub async fn update_key(
 
     match result {
         Ok(r) if r.rows_affected() > 0 => Json(json!({"ok": true})).into_response(),
-        Ok(_) => (
-            axum::http::StatusCode::NOT_FOUND,
-            "Key not found",
-        )
-            .into_response(),
+        Ok(_) => (axum::http::StatusCode::NOT_FOUND, "Key not found").into_response(),
         Err(e) => {
             tracing::error!("Dashboard update_key failed: {}", e);
             (
@@ -810,11 +805,7 @@ pub async fn block_key(
 
     match result {
         Ok(r) if r.rows_affected() > 0 => Json(json!({"ok": true})).into_response(),
-        Ok(_) => (
-            axum::http::StatusCode::NOT_FOUND,
-            "Key not found",
-        )
-            .into_response(),
+        Ok(_) => (axum::http::StatusCode::NOT_FOUND, "Key not found").into_response(),
         Err(e) => {
             tracing::error!("Dashboard block_key failed: {}", e);
             (
@@ -847,11 +838,7 @@ pub async fn unblock_key(
 
     match result {
         Ok(r) if r.rows_affected() > 0 => Json(json!({"ok": true})).into_response(),
-        Ok(_) => (
-            axum::http::StatusCode::NOT_FOUND,
-            "Key not found",
-        )
-            .into_response(),
+        Ok(_) => (axum::http::StatusCode::NOT_FOUND, "Key not found").into_response(),
         Err(e) => {
             tracing::error!("Dashboard unblock_key failed: {}", e);
             (
@@ -895,27 +882,21 @@ pub async fn delete_key(
         tracing::warn!(error = %e, "delete_key: unassign_key_db failed (continuing)");
     }
 
-    let result = sqlx::query(
-        r#"DELETE FROM "boom_verification_token" WHERE token = $1"#,
-    )
-    .bind(&token_hash)
-    .execute(db_pool)
-    .await;
+    let result = sqlx::query(r#"DELETE FROM "boom_verification_token" WHERE token = $1"#)
+        .bind(&token_hash)
+        .execute(db_pool)
+        .await;
 
     match result {
         Ok(r) if r.rows_affected() > 0 => Json(json!({"ok": true})).into_response(),
-        Ok(_) => (
-            axum::http::StatusCode::NOT_FOUND,
-            "Key not found",
-        )
-            .into_response(),
+        Ok(_) => (axum::http::StatusCode::NOT_FOUND, "Key not found").into_response(),
         Err(e) => {
             tracing::error!("Dashboard delete_key failed: {}", e);
             (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal error",
             )
-            .into_response()
+                .into_response()
         }
     }
 }
@@ -999,7 +980,11 @@ pub async fn assign_key(
     match req.plan_name {
         Some(None) => {
             if let Some(ref pool) = state.db_pool {
-                match state.plan_store.assign_key_no_plan_db(pool, &req.key_hash).await {
+                match state
+                    .plan_store
+                    .assign_key_no_plan_db(pool, &req.key_hash)
+                    .await
+                {
                     Ok(()) => {
                         let _ = state
                             .admin_tx
@@ -1020,7 +1005,11 @@ pub async fn assign_key(
         }
         Some(Some(ref name)) => {
             if let Some(ref pool) = state.db_pool {
-                match state.plan_store.assign_key_db(pool, &req.key_hash, name).await {
+                match state
+                    .plan_store
+                    .assign_key_db(pool, &req.key_hash, name)
+                    .await
+                {
                     Ok(()) => {
                         let _ = state
                             .admin_tx
@@ -1069,7 +1058,10 @@ pub async fn unassign_key(
     };
 
     if removed {
-        let _ = state.admin_tx.send(crate::state::AdminCommand::ConfigChanged).await;
+        let _ = state
+            .admin_tx
+            .send(crate::state::AdminCommand::ConfigChanged)
+            .await;
     }
 
     Json(json!({"ok": removed}))
@@ -1102,10 +1094,7 @@ pub async fn assign_team_plan(
             Err(e) => (axum::http::StatusCode::BAD_REQUEST, e).into_response(),
         }
     } else {
-        match state
-            .plan_store
-            .assign_team(&req.team_id, &req.plan_name)
-        {
+        match state.plan_store.assign_team(&req.team_id, &req.plan_name) {
             Ok(()) => {
                 let _ = state
                     .admin_tx
@@ -1202,7 +1191,11 @@ pub async fn batch_create_keys(
 
     for req in reqs {
         match insert_single_key(&state, db_pool, req).await {
-            CreateOutcome::Created { key, token_hash, key_alias } => {
+            CreateOutcome::Created {
+                key,
+                token_hash,
+                key_alias,
+            } => {
                 created.push(json!({
                     "key": key,
                     "token_hash": token_hash,
@@ -1343,7 +1336,10 @@ async fn insert_single_key(
                     let result = if is_default {
                         state.plan_store.assign_key(&token_hash, plan_name)
                     } else {
-                        state.plan_store.assign_key_db(db_pool, &token_hash, plan_name).await
+                        state
+                            .plan_store
+                            .assign_key_db(db_pool, &token_hash, plan_name)
+                            .await
                     };
                     if let Err(e) = result {
                         tracing::warn!("Key created but plan assignment failed: {}", e);
@@ -1377,6 +1373,7 @@ const IMPORT_FIELD_NAME: &str = "file";
 /// giant uploads (an admin pasting a 100MB log file by mistake) OOMing the
 /// handler — admin permission is already required, but defense in depth.
 /// 1 MiB comfortably covers 10k-line payloads at expected per-row sizes.
+#[allow(clippy::identity_op)]
 const IMPORT_MAX_BYTES: usize = 1 * 1024 * 1024;
 
 /// Hard upper bound on parsed rows. Even below the byte cap, a malicious or
@@ -1459,9 +1456,16 @@ pub async fn import_keys(
     //    explicit flag in the response noting that the rest were dropped.
     let truncated = parsed_reqs.len() > IMPORT_MAX_ROWS;
     let parsed_total = parsed_reqs.len();
-    let inserted_count = if truncated { IMPORT_MAX_ROWS } else { parsed_total };
+    let inserted_count = if truncated {
+        IMPORT_MAX_ROWS
+    } else {
+        parsed_total
+    };
     let parsed_reqs = if truncated {
-        parsed_reqs.into_iter().take(IMPORT_MAX_ROWS).collect::<Vec<_>>()
+        parsed_reqs
+            .into_iter()
+            .take(IMPORT_MAX_ROWS)
+            .collect::<Vec<_>>()
     } else {
         parsed_reqs
     };
@@ -1478,7 +1482,11 @@ pub async fn import_keys(
     let mut skipped = Vec::new();
     for req in parsed_reqs {
         match insert_single_key(&state, db_pool, req.clone()).await {
-            CreateOutcome::Created { key, token_hash, key_alias } => {
+            CreateOutcome::Created {
+                key,
+                token_hash,
+                key_alias,
+            } => {
                 created_with_req.push((req, key.clone()));
                 created.push(json!({
                     "key": key,
@@ -1525,45 +1533,57 @@ pub async fn import_keys(
 /// plus a trailing `api_key` column; `models` is rejoined with `|` to round-
 /// trip the in-cell separator. JSONL output adds an `api_key` field to each
 /// object, preserving the original field set.
-fn build_key_download(
-    original_name: &str,
-    created: &[(CreateKeyRequest, String)],
-) -> Value {
+fn build_key_download(original_name: &str, created: &[(CreateKeyRequest, String)]) -> Value {
     if created.is_empty() {
         return Value::Null;
     }
 
-    let stem = original_name.rsplit_once('.').map(|(s, _)| s).unwrap_or(original_name);
-    let ext = original_name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    let stem = original_name
+        .rsplit_once('.')
+        .map(|(s, _)| s)
+        .unwrap_or(original_name);
+    let ext = original_name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase());
     let (ext, content, mime) = match ext.as_deref() {
         Some("csv") => {
             let mut buf = Vec::new();
             {
                 let mut wtr = csv::Writer::from_writer(&mut buf);
                 // Header must mirror CsvKeyRow field order, plus api_key.
-                let _ = wtr.write_record(&[
-                    "key_alias", "key_name", "key_prefix", "tag",
-                    "user_id", "team_id", "models",
-                    "rpm_limit", "tpm_limit", "max_budget", "budget_duration",
-                    "expires", "metadata", "plan_name", "api_key",
+                let _ = wtr.write_record([
+                    "key_alias",
+                    "key_name",
+                    "key_prefix",
+                    "tag",
+                    "user_id",
+                    "team_id",
+                    "models",
+                    "rpm_limit",
+                    "tpm_limit",
+                    "max_budget",
+                    "budget_duration",
+                    "expires",
+                    "metadata",
+                    "plan_name",
+                    "api_key",
                 ]);
                 for (req, key) in created {
-                    let _ = wtr.write_record(&[
+                    let _ = wtr.write_record([
                         req.key_alias.clone().unwrap_or_default(),
                         req.key_name.clone().unwrap_or_default(),
                         req.key_prefix.clone().unwrap_or_default(),
                         req.tag.clone().unwrap_or_default(),
                         req.user_id.clone().unwrap_or_default(),
                         req.team_id.clone().unwrap_or_default(),
-                        req.models.as_ref()
-                            .map(|v| v.join("|"))
-                            .unwrap_or_default(),
+                        req.models.as_ref().map(|v| v.join("|")).unwrap_or_default(),
                         req.rpm_limit.map(|v| v.to_string()).unwrap_or_default(),
                         req.tpm_limit.map(|v| v.to_string()).unwrap_or_default(),
                         req.max_budget.map(|v| v.to_string()).unwrap_or_default(),
                         req.budget_duration.clone().unwrap_or_default(),
                         req.expires.clone().unwrap_or_default(),
-                        req.metadata.as_ref()
+                        req.metadata
+                            .as_ref()
                             .map(|v| v.to_string())
                             .unwrap_or_default(),
                         req.plan_name
@@ -1576,7 +1596,11 @@ fn build_key_download(
                 }
                 let _ = wtr.flush();
             }
-            ("csv".to_string(), String::from_utf8_lossy(&buf).to_string(), "text/csv")
+            (
+                "csv".to_string(),
+                String::from_utf8_lossy(&buf).to_string(),
+                "text/csv",
+            )
         }
         _ => {
             // Default to JSONL — covers .jsonl uploads and the unlikely case
@@ -1734,10 +1758,7 @@ fn parse_csv(bytes: &[u8]) -> (Vec<CreateKeyRequest>, Vec<Value>) {
             // Option<Option<String>>. Non-empty string → Some(Some(name));
             // empty/missing → None (use default at runtime). "Explicit no-plan"
             // cannot be expressed in CSV; use JSONL import/export instead.
-            plan_name: row
-                .plan_name
-                .filter(|s| !s.is_empty())
-                .map(|s| Some(s)),
+            plan_name: row.plan_name.filter(|s| !s.is_empty()).map(Some),
         });
     }
     (reqs, errors)
@@ -1895,7 +1916,15 @@ pub async fn create_model(
 ) -> Response {
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
 
-    if state.admin_tx.send(crate::state::AdminCommand::CreateModel { req, reply: reply_tx }).await.is_err() {
+    if state
+        .admin_tx
+        .send(crate::state::AdminCommand::CreateModel {
+            req,
+            reply: reply_tx,
+        })
+        .await
+        .is_err()
+    {
         return (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             "Admin command handler unavailable",
@@ -1922,7 +1951,16 @@ pub async fn update_model(
 ) -> Response {
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
 
-    if state.admin_tx.send(crate::state::AdminCommand::UpdateModel { id, req, reply: reply_tx }).await.is_err() {
+    if state
+        .admin_tx
+        .send(crate::state::AdminCommand::UpdateModel {
+            id,
+            req,
+            reply: reply_tx,
+        })
+        .await
+        .is_err()
+    {
         return (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             "Admin command handler unavailable",
@@ -1948,7 +1986,15 @@ pub async fn delete_model(
 ) -> Response {
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
 
-    if state.admin_tx.send(crate::state::AdminCommand::DeleteModel { id, reply: reply_tx }).await.is_err() {
+    if state
+        .admin_tx
+        .send(crate::state::AdminCommand::DeleteModel {
+            id,
+            reply: reply_tx,
+        })
+        .await
+        .is_err()
+    {
         return (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             "Admin command handler unavailable",
@@ -2047,7 +2093,10 @@ pub async fn create_alias(
     }
 
     tracing::info!(alias = %req.alias_name, target = %req.target_model, "Alias created");
-    let _ = state.admin_tx.send(crate::state::AdminCommand::ConfigChanged).await;
+    let _ = state
+        .admin_tx
+        .send(crate::state::AdminCommand::ConfigChanged)
+        .await;
     Json(json!({"ok": true, "alias_name": req.alias_name})).into_response()
 }
 
@@ -2079,9 +2128,16 @@ pub async fn update_alias(
         hidden: req.hidden,
     };
 
-    match state.alias_store.update_db(db_pool, &alias_name, &input).await {
+    match state
+        .alias_store
+        .update_db(db_pool, &alias_name, &input)
+        .await
+    {
         Ok(true) => {
-            let _ = state.admin_tx.send(crate::state::AdminCommand::ConfigChanged).await;
+            let _ = state
+                .admin_tx
+                .send(crate::state::AdminCommand::ConfigChanged)
+                .await;
             Json(json!({"ok": true})).into_response()
         }
         Ok(false) => Json(json!({"error": "Alias not found"})).into_response(),
@@ -2107,7 +2163,10 @@ pub async fn delete_alias(
     match state.alias_store.delete_db(db_pool, &alias_name).await {
         Ok(true) => {
             tracing::info!(alias = %alias_name, "Alias deleted");
-            let _ = state.admin_tx.send(crate::state::AdminCommand::ConfigChanged).await;
+            let _ = state
+                .admin_tx
+                .send(crate::state::AdminCommand::ConfigChanged)
+                .await;
             Json(json!({"ok": true, "alias_name": alias_name})).into_response()
         }
         Ok(false) => Json(json!({"error": "Alias not found"})).into_response(),
@@ -2195,21 +2254,33 @@ pub async fn list_logs(
     // Helper: register a param slot, return its index.
     macro_rules! slot {
         ($field:expr) => {
-            if $field.is_some() { let i = param_idx; param_idx += 1; Some(i) } else { None }
+            if $field.is_some() {
+                let i = param_idx;
+                param_idx += 1;
+                Some(i)
+            } else {
+                None
+            }
         };
     }
 
-    let key_hash_param   = slot!(query.key_hash);
-    let model_param      = slot!(query.model);
-    let status_param     = if query.status.as_deref() == Some("error") { let i = param_idx; param_idx += 1; Some(i) } else { None };
+    let key_hash_param = slot!(query.key_hash);
+    let model_param = slot!(query.model);
+    let status_param = if query.status.as_deref() == Some("error") {
+        let i = param_idx;
+        param_idx += 1;
+        Some(i)
+    } else {
+        None
+    };
     let request_id_param = slot!(query.request_id);
-    let key_alias_param  = slot!(query.key_alias);
-    let api_path_param   = slot!(query.api_path);
-    let status_code_param= slot!(query.status_code);
+    let key_alias_param = slot!(query.key_alias);
+    let api_path_param = slot!(query.api_path);
+    let status_code_param = slot!(query.status_code);
     // stream is handled as a static WHERE clause (no param slot needed).
-    let error_param      = slot!(query.error);
+    let error_param = slot!(query.error);
     let team_alias_param = slot!(query.team_alias);
-    let client_ip_param   = slot!(query.client_ip);
+    let client_ip_param = slot!(query.client_ip);
 
     if query.key_hash.is_some() {
         where_clauses.push(format!("rl.key_hash = ${}", key_hash_param.unwrap()));
@@ -2221,10 +2292,16 @@ pub async fn list_logs(
         where_clauses.push(format!("rl.status_code != ${}", status_param.unwrap()));
     }
     if query.request_id.is_some() {
-        where_clauses.push(format!("rl.request_id ILIKE ${}", request_id_param.unwrap()));
+        where_clauses.push(format!(
+            "rl.request_id ILIKE ${}",
+            request_id_param.unwrap()
+        ));
     }
     if query.key_alias.is_some() {
-        where_clauses.push(format!("(rl.key_alias ILIKE ${0} OR rl.key_name ILIKE ${0})", key_alias_param.unwrap()));
+        where_clauses.push(format!(
+            "(rl.key_alias ILIKE ${0} OR rl.key_name ILIKE ${0})",
+            key_alias_param.unwrap()
+        ));
     }
     if query.api_path.is_some() {
         where_clauses.push(format!("rl.api_path ILIKE ${}", api_path_param.unwrap()));
@@ -2244,7 +2321,10 @@ pub async fn list_logs(
         where_clauses.push(format!("rl.error_message ILIKE ${}", error_param.unwrap()));
     }
     if query.team_alias.is_some() {
-        where_clauses.push(format!("bt.team_alias ILIKE ${}", team_alias_param.unwrap()));
+        where_clauses.push(format!(
+            "bt.team_alias ILIKE ${}",
+            team_alias_param.unwrap()
+        ));
     }
     if query.client_ip.is_some() {
         where_clauses.push(format!("rl.client_ip ILIKE ${}", client_ip_param.unwrap()));
@@ -2278,13 +2358,13 @@ pub async fn list_logs(
     let mut q = sqlx::query_as::<_, LogRow>(&sql);
 
     // Pre-build LIKE patterns so they outlive the bind chain.
-    let model_pattern      = query.model.as_ref().map(|v| format!("%{}%", v));
+    let model_pattern = query.model.as_ref().map(|v| format!("%{}%", v));
     let request_id_pattern = query.request_id.as_ref().map(|v| format!("%{}%", v));
-    let key_alias_pattern  = query.key_alias.as_ref().map(|v| format!("%{}%", v));
-    let api_path_pattern   = query.api_path.as_ref().map(|v| format!("%{}%", v));
-    let error_pattern      = query.error.as_ref().map(|v| format!("%{}%", v));
+    let key_alias_pattern = query.key_alias.as_ref().map(|v| format!("%{}%", v));
+    let api_path_pattern = query.api_path.as_ref().map(|v| format!("%{}%", v));
+    let error_pattern = query.error.as_ref().map(|v| format!("%{}%", v));
     let team_alias_pattern = query.team_alias.as_ref().map(|v| format!("%{}%", v));
-    let client_ip_pattern  = query.client_ip.as_ref().map(|v| format!("%{}%", v));
+    let client_ip_pattern = query.client_ip.as_ref().map(|v| format!("%{}%", v));
 
     // Bind parameters (order must match slot allocation above).
     if let Some(ref v) = query.key_hash {
@@ -2338,7 +2418,6 @@ pub async fn list_logs(
     let logs: Vec<Value> = rows
         .into_iter()
         .take(per_page as usize)
-        .into_iter()
         .map(|r| {
             let display_model = match &r.deployment_id {
                 Some(did) if !did.is_empty() => format!("{}:{}", r.model, did),
@@ -2450,17 +2529,23 @@ pub async fn create_team(
             "team_id": req.team_id,
             "team_alias": req.team_alias,
             "models": models,
-        })).into_response(),
+        }))
+        .into_response(),
         Err(e) => {
             let msg = e.to_string();
             if msg.contains("duplicate key") || msg.contains("violates unique") {
                 return (
                     axum::http::StatusCode::CONFLICT,
                     format!("team_id '{}' already exists", req.team_id),
-                ).into_response();
+                )
+                    .into_response();
             }
             tracing::error!("Dashboard create_team failed: {}", e);
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal error",
+            )
+                .into_response()
         }
     }
 }
@@ -2510,7 +2595,11 @@ pub async fn update_team(
         Ok(_) => (axum::http::StatusCode::NOT_FOUND, "Team not found").into_response(),
         Err(e) => {
             tracing::error!("Dashboard update_team failed: {}", e);
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal error",
+            )
+                .into_response()
         }
     }
 }
@@ -2526,34 +2615,38 @@ pub async fn delete_team(
     };
 
     // Check if team has keys.
-    let key_count: i64 = sqlx::query_scalar(
-        r#"SELECT COUNT(*) FROM boom_verification_token WHERE team_id = $1"#,
-    )
-    .bind(&team_id)
-    .fetch_one(db_pool)
-    .await
-    .unwrap_or(0);
+    let key_count: i64 =
+        sqlx::query_scalar(r#"SELECT COUNT(*) FROM boom_verification_token WHERE team_id = $1"#)
+            .bind(&team_id)
+            .fetch_one(db_pool)
+            .await
+            .unwrap_or(0);
 
     if key_count > 0 {
         return (
             axum::http::StatusCode::CONFLICT,
             format!("Cannot delete team: {} key(s) still assigned", key_count),
-        ).into_response();
+        )
+            .into_response();
     }
 
-    let result = sqlx::query(
-        r#"DELETE FROM boom_team_table WHERE team_id = $1"#,
-    )
-    .bind(&team_id)
-    .execute(db_pool)
-    .await;
+    let result = sqlx::query(r#"DELETE FROM boom_team_table WHERE team_id = $1"#)
+        .bind(&team_id)
+        .execute(db_pool)
+        .await;
 
     match result {
-        Ok(r) if r.rows_affected() > 0 => Json(json!({"ok": true, "team_id": team_id})).into_response(),
+        Ok(r) if r.rows_affected() > 0 => {
+            Json(json!({"ok": true, "team_id": team_id})).into_response()
+        }
         Ok(_) => (axum::http::StatusCode::NOT_FOUND, "Team not found").into_response(),
         Err(e) => {
             tracing::error!("Dashboard delete_team failed: {}", e);
-            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal error",
+            )
+                .into_response()
         }
     }
 }
@@ -2573,12 +2666,14 @@ pub async fn get_inflight_stats(
     let dispatched_keys = state.flow_controller.get_dispatched_keys();
 
     // Build lookup: deployment_id → queued waiter entries.
-    let queued_map: HashMap<&str, &Vec<boom_flowcontrol::QueuedWaiterEntry>> = queued_waiters.iter()
+    let queued_map: HashMap<&str, &Vec<boom_flowcontrol::QueuedWaiterEntry>> = queued_waiters
+        .iter()
         .map(|q| (q.deployment_id.as_str(), &q.waiters))
         .collect();
 
     // Build lookup: deployment_id → dispatched key entries.
-    let dispatched_map: HashMap<&str, &Vec<boom_flowcontrol::DispatchedKeyEntry>> = dispatched_keys.iter()
+    let dispatched_map: HashMap<&str, &Vec<boom_flowcontrol::DispatchedKeyEntry>> = dispatched_keys
+        .iter()
         .map(|d| (d.deployment_id.as_str(), &d.keys))
         .collect();
 
@@ -2586,26 +2681,40 @@ pub async fn get_inflight_stats(
 
     // 1. All FlowControl deployments (primary data source).
     for fc in &flowcontrol_stats {
-        let model = state.deployment_store.find_model_by_deployment_id(&fc.deployment_id)
+        let model = state
+            .deployment_store
+            .find_model_by_deployment_id(&fc.deployment_id)
             .unwrap_or_else(|| "-".to_string());
-        let queued_keys: Vec<serde_json::Value> = queued_map.get(fc.deployment_id.as_str())
-            .map(|entries| entries.iter().map(|e| json!({
-                "key_alias": e.key_alias,
-                "is_vip": e.is_vip,
-            })).collect())
+        let queued_keys: Vec<serde_json::Value> = queued_map
+            .get(fc.deployment_id.as_str())
+            .map(|entries| {
+                entries
+                    .iter()
+                    .map(|e| {
+                        json!({
+                            "key_alias": e.key_alias,
+                            "is_vip": e.is_vip,
+                        })
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
-        let key_stats = aggregate_dispatched_keys(dispatched_map.get(fc.deployment_id.as_str()).copied());
-        rows.insert(fc.deployment_id.clone(), json!({
-            "model": model,
-            "deployment_id": fc.deployment_id,
-            "fc_queue": fc.waiters + fc.vip_waiters,
-            "in_reqs": fc.current_inflight,
-            "in_reqs_max": fc.max_inflight,
-            "in_context": fc.current_context,
-            "in_context_max": fc.max_context,
-            "queued_keys": queued_keys,
-            "key_stats": key_stats,
-        }));
+        let key_stats =
+            aggregate_dispatched_keys(dispatched_map.get(fc.deployment_id.as_str()).copied());
+        rows.insert(
+            fc.deployment_id.clone(),
+            json!({
+                "model": model,
+                "deployment_id": fc.deployment_id,
+                "fc_queue": fc.waiters + fc.vip_waiters,
+                "in_reqs": fc.current_inflight,
+                "in_reqs_max": fc.max_inflight,
+                "in_context": fc.current_context,
+                "in_context_max": fc.max_context,
+                "queued_keys": queued_keys,
+                "key_stats": key_stats,
+            }),
+        );
     }
 
     // 2. Per-deployment fallback — deployments without FC config.
@@ -2616,17 +2725,20 @@ pub async fn get_inflight_stats(
         if covered_deployments.contains(&d.deployment_id) {
             continue;
         }
-        rows.insert(d.deployment_id.clone(), json!({
-            "model": d.model,
-            "deployment_id": d.deployment_id,
-            "fc_queue": 0,
-            "in_reqs": d.inflight_requests,
-            "in_reqs_max": 0,
-            "in_context": d.inflight_input_chars,
-            "in_context_max": 0,
-            "queued_keys": [],
-            "key_stats": [],
-        }));
+        rows.insert(
+            d.deployment_id.clone(),
+            json!({
+                "model": d.model,
+                "deployment_id": d.deployment_id,
+                "fc_queue": 0,
+                "in_reqs": d.inflight_requests,
+                "in_reqs_max": 0,
+                "in_context": d.inflight_input_chars,
+                "in_context_max": 0,
+                "queued_keys": [],
+                "key_stats": [],
+            }),
+        );
     }
 
     // Sort: deployments resolvable to a model come first (alphabetical),
@@ -2641,7 +2753,10 @@ pub async fn get_inflight_stats(
         let b_disabled = bm == "-";
         a_disabled.cmp(&b_disabled).then_with(|| {
             am.cmp(bm).then_with(|| {
-                a["deployment_id"].as_str().unwrap_or("").cmp(b["deployment_id"].as_str().unwrap_or(""))
+                a["deployment_id"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(b["deployment_id"].as_str().unwrap_or(""))
             })
         })
     });
@@ -2650,7 +2765,9 @@ pub async fn get_inflight_stats(
 }
 
 /// Aggregate dispatched key entries by key_alias, returning per-key request counts.
-fn aggregate_dispatched_keys(keys: Option<&Vec<boom_flowcontrol::DispatchedKeyEntry>>) -> Vec<serde_json::Value> {
+fn aggregate_dispatched_keys(
+    keys: Option<&Vec<boom_flowcontrol::DispatchedKeyEntry>>,
+) -> Vec<serde_json::Value> {
     let entries = match keys {
         Some(e) => e,
         None => return Vec::new(),
@@ -2662,14 +2779,21 @@ fn aggregate_dispatched_keys(keys: Option<&Vec<boom_flowcontrol::DispatchedKeyEn
         e.0 += 1;
         e.1 = e.1 || entry.is_vip;
     }
-    let mut result: Vec<serde_json::Value> = acc.into_iter()
-        .map(|(alias, (count, is_vip))| json!({
-            "key_alias": alias,
-            "request_count": count,
-            "is_vip": is_vip,
-        }))
+    let mut result: Vec<serde_json::Value> = acc
+        .into_iter()
+        .map(|(alias, (count, is_vip))| {
+            json!({
+                "key_alias": alias,
+                "request_count": count,
+                "is_vip": is_vip,
+            })
+        })
         .collect();
-    result.sort_by(|a, b| b["request_count"].as_u64().cmp(&a["request_count"].as_u64()));
+    result.sort_by(|a, b| {
+        b["request_count"]
+            .as_u64()
+            .cmp(&a["request_count"].as_u64())
+    });
     result
 }
 
@@ -2732,7 +2856,8 @@ pub async fn get_deployment_summary_24h(
         .await?;
         tx.commit().await?;
         Ok::<_, sqlx::Error>(rows)
-    }.await;
+    }
+    .await;
 
     let rows = match rows_res {
         Ok(r) => r,
@@ -2742,10 +2867,15 @@ pub async fn get_deployment_summary_24h(
         }
     };
 
-    let deployments: Vec<serde_json::Value> = rows.into_iter()
+    let deployments: Vec<serde_json::Value> = rows
+        .into_iter()
         .map(|r| {
             let avg = |sum: i64, count: i64| -> Option<f64> {
-                if count == 0 { None } else { Some(sum as f64 / count as f64) }
+                if count == 0 {
+                    None
+                } else {
+                    Some(sum as f64 / count as f64)
+                }
             };
             json!({
                 "deployment_id": r.deployment_id,
@@ -2761,7 +2891,8 @@ pub async fn get_deployment_summary_24h(
     Json(json!({
         "deployments": deployments,
         "window_hours": 24,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2832,7 +2963,9 @@ fn window_json(w: &TimeWindow) -> serde_json::Value {
 /// Begin a dashboard-query transaction with a hard `statement_timeout`.
 /// SET LOCAL scopes the timeout to this transaction only, so it never leaks
 /// into other queries sharing the dashboard pool.
-async fn begin_with_timeout(pool: &sqlx::PgPool) -> Result<sqlx::Transaction<'_, sqlx::Postgres>, sqlx::Error> {
+async fn begin_with_timeout(
+    pool: &sqlx::PgPool,
+) -> Result<sqlx::Transaction<'_, sqlx::Postgres>, sqlx::Error> {
     let mut tx = pool.begin().await?;
     sqlx::query("SET LOCAL statement_timeout = '10s'")
         .execute(&mut *tx)
@@ -2853,8 +2986,11 @@ pub async fn get_request_rate_stats(
     if parsed.use_memory {
         let window = parsed.resolved.to_window();
         let all = state.request_rate.snapshot_all();
-        let expected_ts: Vec<String> = window.expected_buckets().into_iter()
-            .map(|t| t.to_rfc3339()).collect();
+        let expected_ts: Vec<String> = window
+            .expected_buckets()
+            .into_iter()
+            .map(|t| t.to_rfc3339())
+            .collect();
 
         // Reshape per-deployment snapshots into per-model groups. Each model
         // group carries a fixed, alphabetically-ordered deployment_id list and
@@ -2862,8 +2998,10 @@ pub async fn get_request_rate_stats(
         // render stacked bars with stable segment positions across buckets.
         let mut total_counts: Vec<u64> = vec![0u64; expected_ts.len()];
         // model -> (deployment_id -> bucket counts)
-        let mut by_model: std::collections::BTreeMap<String, std::collections::HashMap<String, Vec<u64>>> =
-            std::collections::BTreeMap::new();
+        let mut by_model: std::collections::BTreeMap<
+            String,
+            std::collections::HashMap<String, Vec<u64>>,
+        > = std::collections::BTreeMap::new();
 
         for (dep_id, data) in all.into_iter() {
             // Tracker has exactly 60 buckets aligned to (now - 59min) .. now,
@@ -2876,7 +3014,9 @@ pub async fn get_request_rate_stats(
             // Pad / truncate to expected length just in case.
             let mut v = counts;
             v.resize(expected_ts.len(), 0u64);
-            let model = state.deployment_store.find_model_by_deployment_id(&dep_id)
+            let model = state
+                .deployment_store
+                .find_model_by_deployment_id(&dep_id)
                 .unwrap_or_else(|| "-".to_string());
             by_model.entry(model).or_default().insert(dep_id, v);
         }
@@ -2895,7 +3035,8 @@ pub async fn get_request_rate_stats(
             // buckets and across reloads.
             let mut dep_order: Vec<String> = dep_counts.keys().cloned().collect();
             dep_order.sort();
-            let segments_per_dep: Vec<(String, &Vec<u64>)> = dep_order.iter()
+            let segments_per_dep: Vec<(String, &Vec<u64>)> = dep_order
+                .iter()
                 .map(|d| (d.clone(), dep_counts.get(d).unwrap()))
                 .collect();
             charts.push(json!({
@@ -2908,7 +3049,8 @@ pub async fn get_request_rate_stats(
         return Json(json!({
             "window": window_json(&window),
             "charts": charts,
-        })).into_response();
+        }))
+        .into_response();
     }
 
     let window = parsed.resolved.to_window();
@@ -2953,21 +3095,35 @@ pub async fn get_request_rate_stats(
         }
     };
 
-    let expected: Vec<i64> = window.expected_buckets().into_iter().map(|t| t.timestamp()).collect();
+    let expected: Vec<i64> = window
+        .expected_buckets()
+        .into_iter()
+        .map(|t| t.timestamp())
+        .collect();
 
     // Group by model → deployment_id → bucket count. Deployments are ordered
     // alphabetically per model so stacked-bar segment positions are stable.
     let mut total_by_bucket: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
     // model -> (deployment_id -> (bucket_epoch -> count))
-    let mut by_model: std::collections::BTreeMap<String, std::collections::HashMap<String, std::collections::HashMap<i64, i64>>> =
-        std::collections::BTreeMap::new();
+    let mut by_model: std::collections::BTreeMap<
+        String,
+        std::collections::HashMap<String, std::collections::HashMap<i64, i64>>,
+    > = std::collections::BTreeMap::new();
 
     for row in rows {
-        let dep = row.deployment_id.clone().unwrap_or_else(|| "_unknown".to_string());
-        let model = state.deployment_store.find_model_by_deployment_id(&dep)
+        let dep = row
+            .deployment_id
+            .clone()
+            .unwrap_or_else(|| "_unknown".to_string());
+        let model = state
+            .deployment_store
+            .find_model_by_deployment_id(&dep)
             .unwrap_or_else(|| "-".to_string());
-        by_model.entry(model).or_default()
-            .entry(dep).or_default()
+        by_model
+            .entry(model)
+            .or_default()
+            .entry(dep)
+            .or_default()
             .insert(row.bucket_epoch, row.total);
         *total_by_bucket.entry(row.bucket_epoch).or_insert(0) += row.total;
     }
@@ -2985,15 +3141,21 @@ pub async fn get_request_rate_stats(
         let mut dep_order: Vec<String> = dep_map.keys().cloned().collect();
         dep_order.sort();
         // For each expected bucket, build a segment array in dep_order.
-        let events: Vec<serde_json::Value> = expected.iter().map(|ep| {
-            let ts = chrono::DateTime::<chrono::Utc>::from_timestamp(*ep, 0)
-                .unwrap_or_else(chrono::Utc::now);
-            let segments: Vec<serde_json::Value> = dep_order.iter().map(|d| {
-                let cnt = dep_map.get(d).and_then(|m| m.get(ep)).copied().unwrap_or(0);
-                json!({ "deployment_id": d, "count": cnt })
-            }).collect();
-            json!({ "ts": ts.to_rfc3339(), "segments": segments })
-        }).collect();
+        let events: Vec<serde_json::Value> = expected
+            .iter()
+            .map(|ep| {
+                let ts = chrono::DateTime::<chrono::Utc>::from_timestamp(*ep, 0)
+                    .unwrap_or_else(chrono::Utc::now);
+                let segments: Vec<serde_json::Value> = dep_order
+                    .iter()
+                    .map(|d| {
+                        let cnt = dep_map.get(d).and_then(|m| m.get(ep)).copied().unwrap_or(0);
+                        json!({ "deployment_id": d, "count": cnt })
+                    })
+                    .collect();
+                json!({ "ts": ts.to_rfc3339(), "segments": segments })
+            })
+            .collect();
         charts.push(json!({
             "model": model,
             "deployments": dep_order,
@@ -3004,29 +3166,37 @@ pub async fn get_request_rate_stats(
     Json(json!({
         "window": window_json(&window),
         "charts": charts,
-    })).into_response()
+    }))
+    .into_response()
 }
 
 fn build_rate_events(
     expected: &[i64],
     counts: &std::collections::HashMap<i64, i64>,
 ) -> Vec<serde_json::Value> {
-    expected.iter().map(|ep| {
-        let ts = chrono::DateTime::<chrono::Utc>::from_timestamp(*ep, 0)
-            .unwrap_or_else(chrono::Utc::now);
-        json!({
-            "ts": ts.to_rfc3339(),
-            "count": counts.get(ep).copied().unwrap_or(0),
+    expected
+        .iter()
+        .map(|ep| {
+            let ts = chrono::DateTime::<chrono::Utc>::from_timestamp(*ep, 0)
+                .unwrap_or_else(chrono::Utc::now);
+            json!({
+                "ts": ts.to_rfc3339(),
+                "count": counts.get(ep).copied().unwrap_or(0),
+            })
         })
-    }).collect()
+        .collect()
 }
 
 /// Build events for the _total chart (no segments).
 fn build_rate_events_simple(expected_ts: &[String], counts: &[u64]) -> Vec<serde_json::Value> {
-    expected_ts.iter().enumerate().map(|(i, ts)| {
-        let c = counts.get(i).copied().unwrap_or(0);
-        json!({ "ts": ts, "count": c })
-    }).collect()
+    expected_ts
+        .iter()
+        .enumerate()
+        .map(|(i, ts)| {
+            let c = counts.get(i).copied().unwrap_or(0);
+            json!({ "ts": ts, "count": c })
+        })
+        .collect()
 }
 
 /// Build events for a per-model chart with per-deployment segments.
@@ -3036,13 +3206,20 @@ fn build_rate_events_segmented(
     expected_ts: &[String],
     segments_per_dep: &[(String, &Vec<u64>)],
 ) -> Vec<serde_json::Value> {
-    expected_ts.iter().enumerate().map(|(i, ts)| {
-        let segs: Vec<serde_json::Value> = segments_per_dep.iter().map(|(dep, counts)| {
-            let c = counts.get(i).copied().unwrap_or(0);
-            json!({ "deployment_id": dep, "count": c })
-        }).collect();
-        json!({ "ts": ts, "segments": segs })
-    }).collect()
+    expected_ts
+        .iter()
+        .enumerate()
+        .map(|(i, ts)| {
+            let segs: Vec<serde_json::Value> = segments_per_dep
+                .iter()
+                .map(|(dep, counts)| {
+                    let c = counts.get(i).copied().unwrap_or(0);
+                    json!({ "deployment_id": dep, "count": c })
+                })
+                .collect();
+            json!({ "ts": ts, "segments": segs })
+        })
+        .collect()
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3062,25 +3239,34 @@ pub async fn get_agent_stats(
     if parsed.use_memory {
         let snap = state.agent_stats.snapshot();
         let window = parsed.resolved.to_window();
-        let expected_ts: Vec<String> = window.expected_buckets().into_iter()
-            .map(|t| t.to_rfc3339()).collect();
+        let expected_ts: Vec<String> = window
+            .expected_buckets()
+            .into_iter()
+            .map(|t| t.to_rfc3339())
+            .collect();
         // Tracker has 60 buckets aligned to (now - 59min) .. now; pair each by index.
-        let events: Vec<serde_json::Value> = snap.events.into_iter().enumerate()
-            .map(|(i, b)| json!({
-                "ts": expected_ts.get(i).cloned().unwrap_or_default(),
-                "total": b.total,
-                "anthropic": b.anthropic,
-                "input_tokens_total": b.input_tokens_total,
-                "input_tokens_anthropic": b.input_tokens_anthropic,
-                "output_tokens_total": b.output_tokens_total,
-                "output_tokens_anthropic": b.output_tokens_anthropic,
-            }))
+        let events: Vec<serde_json::Value> = snap
+            .events
+            .into_iter()
+            .enumerate()
+            .map(|(i, b)| {
+                json!({
+                    "ts": expected_ts.get(i).cloned().unwrap_or_default(),
+                    "total": b.total,
+                    "anthropic": b.anthropic,
+                    "input_tokens_total": b.input_tokens_total,
+                    "input_tokens_anthropic": b.input_tokens_anthropic,
+                    "output_tokens_total": b.output_tokens_total,
+                    "output_tokens_anthropic": b.output_tokens_anthropic,
+                })
+            })
             .collect();
         return Json(json!({
             "window": window_json(&window),
             "events": events,
             "summary": serde_json::to_value(&snap.summary).unwrap_or_default(),
-        })).into_response();
+        }))
+        .into_response();
     }
 
     let window = parsed.resolved.to_window();
@@ -3129,9 +3315,8 @@ pub async fn get_agent_stats(
         }
     };
 
-    let by_epoch: std::collections::HashMap<i64, AgentBucketRow> = rows.into_iter()
-        .map(|r| (r.bucket_epoch, r))
-        .collect();
+    let by_epoch: std::collections::HashMap<i64, AgentBucketRow> =
+        rows.into_iter().map(|r| (r.bucket_epoch, r)).collect();
 
     let mut events: Vec<serde_json::Value> = Vec::new();
     let mut total: u64 = 0;
@@ -3169,7 +3354,11 @@ pub async fn get_agent_stats(
             "output_tokens_anthropic": oa,
         }));
     }
-    let ratio = if total == 0 { 0.0 } else { anthropic as f64 / total as f64 };
+    let ratio = if total == 0 {
+        0.0
+    } else {
+        anthropic as f64 / total as f64
+    };
     let input_token_ratio = if input_tokens_total == 0 {
         0.0
     } else {
@@ -3195,7 +3384,8 @@ pub async fn get_agent_stats(
             "output_tokens_anthropic": output_tokens_anthropic,
             "output_token_ratio": output_token_ratio,
         },
-    })).into_response()
+    }))
+    .into_response()
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3262,9 +3452,14 @@ pub async fn toggle_debug(
     state.debug_store.set_enabled(req.enabled);
     // Also toggle raw upstream response capture alongside debug mode.
     let prompt_cfg = state.prompt_log_writer.config();
-    let new_cfg = prompt_cfg.with_enabled(true).with_capture_raw_upstream(req.enabled);
+    let new_cfg = prompt_cfg
+        .with_enabled(true)
+        .with_capture_raw_upstream(req.enabled);
     state.prompt_log_writer.update_config(new_cfg);
-    tracing::info!(enabled = req.enabled, "Debug toggled (debug errors + raw upstream capture)");
+    tracing::info!(
+        enabled = req.enabled,
+        "Debug toggled (debug errors + raw upstream capture)"
+    );
     Json(json!({
         "ok": true,
         "enabled": req.enabled,
@@ -3311,11 +3506,7 @@ pub async fn reload_config(
 
     match reply_rx.await {
         Ok(Ok(msg)) => Json(json!({"ok": true, "message": msg})).into_response(),
-        Ok(Err(msg)) => (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            msg,
-        )
-            .into_response(),
+        Ok(Err(msg)) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, msg).into_response(),
         Err(_) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             "Admin command handler dropped reply",
@@ -3619,22 +3810,21 @@ pub async fn quota_overview(
     };
 
     // 1. Teams metadata (now includes models array).
-    let team_rows: Vec<(String, Option<String>, Option<Vec<String>>)> = match sqlx::query_as(
-        "SELECT team_id, team_alias, models FROM boom_team_table",
-    )
-    .fetch_all(db_pool)
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("quota_overview teams query failed: {}", e);
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("quota_overview teams query failed: {e}"),
-            )
-                .into_response();
-        }
-    };
+    let team_rows: Vec<(String, Option<String>, Option<Vec<String>>)> =
+        match sqlx::query_as("SELECT team_id, team_alias, models FROM boom_team_table")
+            .fetch_all(db_pool)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("quota_overview teams query failed: {}", e);
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("quota_overview teams query failed: {e}"),
+                )
+                    .into_response();
+            }
+        };
 
     // 2. Keys-per-team counts.
     let key_count_rows: Vec<(Option<String>, i64)> = match sqlx::query_as(
@@ -3655,40 +3845,38 @@ pub async fn quota_overview(
     };
 
     // 3. token → team_id (so we can bucket key-level cumulative by team).
-    let token_team_rows: Vec<(String, Option<String>)> = match sqlx::query_as(
-        "SELECT token, team_id FROM boom_verification_token",
-    )
-    .fetch_all(db_pool)
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("quota_overview token_team query failed: {}", e);
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("quota_overview token_team query failed: {e}"),
-            )
-                .into_response();
-        }
-    };
+    let token_team_rows: Vec<(String, Option<String>)> =
+        match sqlx::query_as("SELECT token, team_id FROM boom_verification_token")
+            .fetch_all(db_pool)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("quota_overview token_team query failed: {}", e);
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("quota_overview token_team query failed: {e}"),
+                )
+                    .into_response();
+            }
+        };
 
     // 4. All cumulative rows. Single-table scan — safe under GaussDB distributed.
-    let cum_rows: Vec<(String, i64)> = match sqlx::query_as(
-        "SELECT cache_key, value FROM boom_rate_limit_cumulative",
-    )
-    .fetch_all(db_pool)
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!("quota_overview cumulative query failed: {}", e);
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("quota_overview cumulative query failed: {e}"),
-            )
-                .into_response();
-        }
-    };
+    let cum_rows: Vec<(String, i64)> =
+        match sqlx::query_as("SELECT cache_key, value FROM boom_rate_limit_cumulative")
+            .fetch_all(db_pool)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("quota_overview cumulative query failed: {}", e);
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("quota_overview cumulative query failed: {e}"),
+                )
+                    .into_response();
+            }
+        };
 
     // Aggregate cumulative by (scope, id) → (tin, tout, tcost).
     // cache_key format: 'kc:{token}:{kind}' or 'tc:{team_id}:{kind}'.
@@ -3729,17 +3917,18 @@ pub async fn quota_overview(
     for (tid, n) in &key_count_rows {
         match tid {
             Some(t) => {
-                team_key_count.entry(t.clone()).and_modify(|v| *v += n).or_insert(*n);
+                team_key_count
+                    .entry(t.clone())
+                    .and_modify(|v| *v += n)
+                    .or_insert(*n);
             }
             None => no_team_key_count += n,
         }
     }
 
     // team_id of each token (for no-team cumulative aggregation).
-    let token_team: std::collections::HashMap<String, Option<String>> = token_team_rows
-        .iter()
-        .cloned()
-        .collect();
+    let token_team: std::collections::HashMap<String, Option<String>> =
+        token_team_rows.iter().cloned().collect();
 
     // No-team cumulative: sum key_cum for tokens whose team_id IS NULL.
     let mut no_team_cum = (0i64, 0i64, 0i64);
@@ -3759,11 +3948,7 @@ pub async fn quota_overview(
         .collect();
 
     // prompt-log excluded teams — read once, lookup in loop.
-    let excluded_teams: Vec<String> = state
-        .prompt_log_writer
-        .config()
-        .excluded_teams
-        .clone();
+    let excluded_teams: Vec<String> = state.prompt_log_writer.config().excluded_teams.clone();
 
     // Build teams vector sorted by cost DESC, then tokens DESC.
     let mut teams: Vec<Value> = team_rows
@@ -3775,37 +3960,40 @@ pub async fn quota_overview(
                 .clone()
                 .or_else(|| state.plan_store.get_default_team_plan_name());
             // Resolve full plan to compute effective limits.
-            let effective_limits = state
-                .plan_store
-                .resolve_team_plan(&team_id)
-                .map(|p| {
-                    let (concurrency_limit, window_limits, _) = p.effective_limits();
-                    // rpm_limit is the 60s counts dimension (folded into window_limits).
-                    let rpm_limit = window_limits
-                        .iter()
-                        .find(|w| w.window_secs == 60)
-                        .and_then(|w| w.counts);
-                    let wl_json: Vec<serde_json::Value> = window_limits
-                        .iter()
-                        .map(|w| {
-                            let counts = w.counts.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null);
-                            let tokens = w.tokens.map(serde_json::Value::from).unwrap_or(serde_json::Value::Null);
-                            let costs = w
-                                .costs
-                                .map(|c| serde_json::Value::String(c.to_string()))
-                                .unwrap_or(serde_json::Value::Null);
-                            serde_json::json!([counts, tokens, costs, w.window_secs])
-                        })
-                        .collect();
-                    json!({
-                        "concurrency_limit": concurrency_limit,
-                        "rpm_limit": rpm_limit,
-                        "tpm_limit": p.tpm_limit,
-                        "window_limits": wl_json,
-                        "total_token_limit": p.total_token_limit,
-                        "total_cost_limit": p.total_cost_limit.map(|c| c.to_string()),
+            let effective_limits = state.plan_store.resolve_team_plan(&team_id).map(|p| {
+                let (concurrency_limit, window_limits, _) = p.effective_limits();
+                // rpm_limit is the 60s counts dimension (folded into window_limits).
+                let rpm_limit = window_limits
+                    .iter()
+                    .find(|w| w.window_secs == 60)
+                    .and_then(|w| w.counts);
+                let wl_json: Vec<serde_json::Value> = window_limits
+                    .iter()
+                    .map(|w| {
+                        let counts = w
+                            .counts
+                            .map(serde_json::Value::from)
+                            .unwrap_or(serde_json::Value::Null);
+                        let tokens = w
+                            .tokens
+                            .map(serde_json::Value::from)
+                            .unwrap_or(serde_json::Value::Null);
+                        let costs = w
+                            .costs
+                            .map(|c| serde_json::Value::String(c.to_string()))
+                            .unwrap_or(serde_json::Value::Null);
+                        serde_json::json!([counts, tokens, costs, w.window_secs])
                     })
-                });
+                    .collect();
+                json!({
+                    "concurrency_limit": concurrency_limit,
+                    "rpm_limit": rpm_limit,
+                    "tpm_limit": p.tpm_limit,
+                    "window_limits": wl_json,
+                    "total_token_limit": p.total_token_limit,
+                    "total_cost_limit": p.total_cost_limit.map(|c| c.to_string()),
+                })
+            });
             let prompt_log_excluded = excluded_teams.iter().any(|t| t == &team_id);
             json!({
                 "team_id": team_id,
@@ -3826,12 +4014,11 @@ pub async fn quota_overview(
     teams.sort_by(|a, b| {
         let ca = a["total_cost_micros"].as_i64().unwrap_or(0);
         let cb = b["total_cost_micros"].as_i64().unwrap_or(0);
-        cb.cmp(&ca)
-            .then_with(|| {
-                let ta = a["total_input_tokens"].as_i64().unwrap_or(0);
-                let tb = b["total_input_tokens"].as_i64().unwrap_or(0);
-                tb.cmp(&ta)
-            })
+        cb.cmp(&ca).then_with(|| {
+            let ta = a["total_input_tokens"].as_i64().unwrap_or(0);
+            let tb = b["total_input_tokens"].as_i64().unwrap_or(0);
+            tb.cmp(&ta)
+        })
     });
 
     let no_team = json!({
@@ -3905,9 +4092,10 @@ async fn quota_keys_inner(
     let (page, per_page) = normalize_pagination(q.page, q.per_page);
     let offset = (page - 1) * per_page;
 
-    let search_pattern = q.search.as_deref().map(|s| {
-        format!("%{}%", s.replace('%', "\\%").replace('_', "\\_"))
-    });
+    let search_pattern = q
+        .search
+        .as_deref()
+        .map(|s| format!("%{}%", s.replace('%', "\\%").replace('_', "\\_")));
 
     // Single-table query on boom_verification_token (no JOINs).
     let where_clause = match (&team_id, &search_pattern) {
@@ -4040,8 +4228,7 @@ async fn quota_keys_inner(
                 ]
             })
             .collect();
-        let placeholders: Vec<String> =
-            (1..=cache_keys.len()).map(|i| format!("${i}")).collect();
+        let placeholders: Vec<String> = (1..=cache_keys.len()).map(|i| format!("${i}")).collect();
         let cum_sql = format!(
             "SELECT cache_key, value FROM boom_rate_limit_cumulative WHERE cache_key IN ({})",
             placeholders.join(", ")
@@ -4086,14 +4273,17 @@ async fn quota_keys_inner(
             Some("cost") => {
                 sortable.sort_by(|a, b| {
                     // DESC by tcost, tiebreak by tokens DESC.
-                    b.1.2.cmp(&a.1.2)
-                        .then_with(|| (b.1.0 + b.1.1).cmp(&(a.1.0 + a.1.1)))
+                    b.1 .2
+                        .cmp(&a.1 .2)
+                        .then_with(|| (b.1 .0 + b.1 .1).cmp(&(a.1 .0 + a.1 .1)))
                 });
             }
             Some("tokens") => {
                 sortable.sort_by(|a, b| {
                     // DESC by tin+tout, tiebreak by tcost DESC.
-                    (b.1.0 + b.1.1).cmp(&(a.1.0 + a.1.1)).then_with(|| b.1.2.cmp(&a.1.2))
+                    (b.1 .0 + b.1 .1)
+                        .cmp(&(a.1 .0 + a.1 .1))
+                        .then_with(|| b.1 .2.cmp(&a.1 .2))
                 });
             }
             _ => {}
@@ -4160,10 +4350,10 @@ pub async fn quota_key_windows(
         .plan_store
         .resolve_plan(&key_hash)
         .or_else(|| state.plan_store.get_default_plan());
-    let (_, plan_window_limits, _) = plan
-        .as_ref()
-        .map(|p| p.effective_limits())
-        .unwrap_or((None, vec![], vec![]));
+    let (_, plan_window_limits, _) =
+        plan.as_ref()
+            .map(|p| p.effective_limits())
+            .unwrap_or((None, vec![], vec![]));
     // rpm_limit is the 60s counts dimension (folded into window_limits).
     let plan_rpm = plan_window_limits
         .iter()
@@ -4219,18 +4409,26 @@ pub async fn quota_key_windows(
         .iter()
         .map(|&secs| {
             let wl = plan_window_limits.iter().find(|w| w.window_secs == secs);
-            let counts_limit = wl.and_then(|w| w.counts).or(if secs == 60 { plan_rpm } else { None });
+            let counts_limit =
+                wl.and_then(|w| w.counts)
+                    .or(if secs == 60 { plan_rpm } else { None });
             let tokens_limit = wl.and_then(|w| w.tokens);
             let costs_limit = wl.and_then(|w| w.costs);
 
             let mut dims = serde_json::Map::new();
             if let Some(limit) = counts_limit {
                 let cur = counts_by_secs.get(&secs).map(|&(c, _)| c).unwrap_or(0);
-                dims.insert("counts".to_string(), json!({ "current": cur, "limit": limit }));
+                dims.insert(
+                    "counts".to_string(),
+                    json!({ "current": cur, "limit": limit }),
+                );
             }
             if let Some(limit) = tokens_limit {
                 let cur = tokens_by_secs.get(&secs).map(|&(c, _)| c).unwrap_or(0);
-                dims.insert("tokens".to_string(), json!({ "current": cur, "limit": limit }));
+                dims.insert(
+                    "tokens".to_string(),
+                    json!({ "current": cur, "limit": limit }),
+                );
             }
             if let Some(limit) = costs_limit {
                 let cur_micros = costs_by_secs.get(&secs).map(|&(c, _)| c).unwrap_or(0);
@@ -4361,7 +4559,11 @@ pub async fn quota_reset_team(
         Ok(v) => v,
         Err(e) => {
             tracing::error!("quota_reset_team member fetch failed: {}", e);
-            return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("member fetch failed: {e}")).into_response();
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("member fetch failed: {e}"),
+            )
+                .into_response();
         }
     };
 
@@ -4373,7 +4575,11 @@ pub async fn quota_reset_team(
     }
 
     let member_count = member_keys.len();
-    match state.limiter.reset_team_all(db_pool, &team_id, &member_keys).await {
+    match state
+        .limiter
+        .reset_team_all(db_pool, &team_id, &member_keys)
+        .await
+    {
         Ok(()) => {
             let _ = state
                 .admin_tx
@@ -4484,11 +4690,7 @@ pub async fn quota_reset_key_windows(
         None => return Json(json!({"error": "Database not available"})).into_response(),
     };
     let limiter_cleared = state.limiter.clear_for_key(&key_hash);
-    match state
-        .limiter
-        .clear_key_windows_db(db_pool, &key_hash)
-        .await
-    {
+    match state.limiter.clear_key_windows_db(db_pool, &key_hash).await {
         Ok(quota_windows_cleared) => {
             let _ = state
                 .admin_tx
@@ -4652,10 +4854,10 @@ mod tests {
     }
 
     /// Lock in the three-state JSON semantics of `CreateKeyRequest::plan_name`:
-    ///   - field absent      → None             (use default_plan at runtime)
-    ///   - `plan_name: null`  → Some(None)       (explicit "no plan")
-    ///   - `plan_name: "x"`   → Some(Some("x"))  (assign to plan "x")
-    /// Regression guard: if the deserialize_some helper breaks, these will fail.
+    /// - field absent      → None             (use default_plan at runtime)
+    /// - `plan_name: null`  → Some(None)       (explicit "no plan")
+    /// - `plan_name: "x"`   → Some(Some("x"))  (assign to plan "x")
+    ///   Regression guard: if the deserialize_some helper breaks, these will fail.
     #[test]
     fn create_key_request_plan_name_three_state_deserialization() {
         let absent: CreateKeyRequest = serde_json::from_str(r#"{"key_alias":"a"}"#).unwrap();

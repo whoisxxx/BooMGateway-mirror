@@ -37,7 +37,8 @@ impl StrategyRegistry {
 
     /// Register a strategy. One-line call at startup.
     pub fn register(&mut self, strategy: Arc<dyn ClassificationStrategy>) {
-        self.strategies.insert(strategy.name().to_string(), strategy);
+        self.strategies
+            .insert(strategy.name().to_string(), strategy);
     }
 
     /// Look up a strategy by name.
@@ -123,16 +124,36 @@ impl ClassificationStrategy for TierClassifier {
         }
 
         // Debug/system keywords.
-        let debug_keywords = ["debug", "调试", "traceback", "error log", "stack trace", "异常"];
-        let debug_count = debug_keywords.iter().filter(|k| user_text_lower.contains(*k)).count();
+        let debug_keywords = [
+            "debug",
+            "调试",
+            "traceback",
+            "error log",
+            "stack trace",
+            "异常",
+        ];
+        let debug_count = debug_keywords
+            .iter()
+            .filter(|k| user_text_lower.contains(*k))
+            .count();
         if debug_count > 0 {
             score += 0.5 * debug_count.min(2) as f64;
         }
 
         // Reasoning keywords.
         let reasoning_keywords = [
-            "prove", "证明", "推导", "theorem", "公式", "formula", "derive",
-            "mathematical", "数学", "calculus", "logic", "逻辑推理",
+            "prove",
+            "证明",
+            "推导",
+            "theorem",
+            "公式",
+            "formula",
+            "derive",
+            "mathematical",
+            "数学",
+            "calculus",
+            "logic",
+            "逻辑推理",
         ];
         let reasoning_count = reasoning_keywords
             .iter()
@@ -166,7 +187,7 @@ impl ClassificationStrategy for TierClassifier {
 
         if score < 0.5 {
             "small".to_string()
-        } else if score < 1.5 {
+        } else if score < 1.2 {
             "medium".to_string()
         } else {
             "large".to_string()
@@ -255,7 +276,7 @@ impl HybridRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use boom_core::types::{ContentPart, MessageRole};
+    use boom_core::types::MessageRole;
 
     fn make_messages(texts: Vec<(&str, &str)>) -> Vec<Message> {
         texts
@@ -325,7 +346,9 @@ mod tests {
             },
         }];
         let result = router.classify("auto", &msgs, &Some(tools));
-        assert!(result == Some("medium-cup".to_string()) || result == Some("large-cup".to_string()));
+        assert!(
+            result == Some("medium-cup".to_string()) || result == Some("large-cup".to_string())
+        );
     }
 
     #[test]

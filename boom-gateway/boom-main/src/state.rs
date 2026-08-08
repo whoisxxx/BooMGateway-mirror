@@ -1,20 +1,23 @@
 use arc_swap::ArcSwap;
 use boom_auth::DbAuthenticator;
 use boom_config::Config;
+use boom_core::kv_event::KvIndexBackend;
 use boom_core::provider::{Authenticator, KeyAliasLookup};
 use boom_core::DebugErrorStore;
-use boom_kvindex::{TokenPrefixIndex};
-use boom_core::kv_event::KvIndexBackend;
-use boom_limiter::{PlanStore, RateLimitPlan, ScheduleSlot, SlidingWindowLimiter};
-use boom_flowcontrol::{FlowControlConfig, FlowController};
-use boom_routing::{register_fusion_providers, AliasStore, DeploymentStore, FusionRuntime, HybridRouter, InFlightTracker, KeyAffinityPolicy, RebalanceMoveTracker, RequestRateTracker, Router, RoundRobinPolicy, SchedulePolicy, StrategyRegistry, TierClassifier};
 use boom_ctxaware::AgentStatsTracker;
+use boom_flowcontrol::{FlowControlConfig, FlowController};
+use boom_kvindex::TokenPrefixIndex;
+use boom_limiter::{PlanStore, RateLimitPlan, ScheduleSlot, SlidingWindowLimiter};
 use boom_promptlog::PromptLogWriter;
-use boom_provider;
-use sqlx::PgPool;
+use boom_routing::{
+    register_fusion_providers, AliasStore, DeploymentStore, FusionRuntime, HybridRouter,
+    InFlightTracker, KeyAffinityPolicy, RebalanceMoveTracker, RequestRateTracker, RoundRobinPolicy,
+    Router, SchedulePolicy, StrategyRegistry, TierClassifier,
+};
 use dashmap::DashMap;
-use std::sync::Arc;
+use sqlx::PgPool;
 use std::sync::atomic::{AtomicU32, AtomicU64};
+use std::sync::Arc;
 
 use crate::health_monitor::DeploymentHealthStore;
 
@@ -210,7 +213,13 @@ impl AppState {
         let kv_index_val = Self::build_kvc_subsystems(&config);
 
         // Create scheduling policy from config (may reference inflight, rebalance_move_tracker, kv_index).
-        let policy = create_policy(&config, &inflight, &flow_controller, &rebalance_move_tracker, &kv_index_val);
+        let policy = create_policy(
+            &config,
+            &inflight,
+            &flow_controller,
+            &rebalance_move_tracker,
+            &kv_index_val,
+        );
 
         // Build hybrid router classifier (optional, content-based model routing).
         let hybrid_classifier = build_hybrid_router(&config);
@@ -256,7 +265,9 @@ impl AppState {
         }
 
         // 6. Build inner state (config + auth + health).
-        let prompt_log_config = config.prompt_log.as_ref()
+        let prompt_log_config = config
+            .prompt_log
+            .as_ref()
             .and_then(|v| serde_json::from_value::<boom_promptlog::PromptLogConfig>(v.clone()).ok())
             .unwrap_or_default();
         let prompt_log_writer = PromptLogWriter::spawn(prompt_log_config);
@@ -268,10 +279,7 @@ impl AppState {
         // empty trie into this ArcSwap; both holders get an Arc clone of the
         // SAME ArcSwap so the orchestrator sees the swap.
         let kv_index = Arc::new(ArcSwap::from_pointee(kv_index_val));
-        let kvc_orchestrator = crate::kvc::KvcOrchestrator::new(
-            kv_index.clone(),
-            router.clone(),
-        );
+        let kvc_orchestrator = crate::kvc::KvcOrchestrator::new(kv_index.clone(), router.clone());
 
         let state = Self {
             config_path,
@@ -336,8 +344,12 @@ impl AppState {
             Ok(Err(panic_payload)) => {
                 let msg = panic_payload
                     .downcast_ref::<String>()
-                    .map(|s| s.clone())
-                    .or_else(|| panic_payload.downcast_ref::<&'static str>().map(|s| s.to_string()))
+                    .cloned()
+                    .or_else(|| {
+                        panic_payload
+                            .downcast_ref::<&'static str>()
+                            .map(|s| s.to_string())
+                    })
                     .unwrap_or_else(|| "(non-string panic payload)".to_string());
                 tracing::error!(
                     elapsed_ms = started.elapsed().as_millis() as u64,
@@ -446,10 +458,7 @@ impl AppState {
         // up the new TTL, and the LRU capacity adapts on the next batch.
         let kvc_sig = |r: &boom_config::RouterSettings| {
             let k = &r.kvc_aware;
-            (
-                r.schedule_policy.clone(),
-                k.block_size,
-            )
+            (r.schedule_policy.clone(), k.block_size)
         };
         if kvc_sig(&old_router) == kvc_sig(&new_config.router_settings) {
             tracing::info!("KV-aware subsystem unchanged — preserving learned trie (no rebuild)");
@@ -481,7 +490,7 @@ impl AppState {
             &self.inflight,
             &self.flow_controller,
             &self.rebalance_move_tracker,
-            &**self.kv_index.load(),
+            &self.kv_index.load(),
         );
         self.router.set_policy(new_policy);
 
@@ -496,7 +505,9 @@ impl AppState {
             if let Err(e) = with_db_timeout(
                 "sync_yaml_to_db",
                 sync_yaml_to_db(pool, &new_config, &self.plan_store),
-            ).await {
+            )
+            .await
+            {
                 tracing::error!("Failed to sync YAML to DB: {}", e);
             }
 
@@ -507,15 +518,18 @@ impl AppState {
             with_db_timeout_void(
                 "load_db_only_deployments",
                 load_db_only_deployments(pool, &self.deployment_store, &self.flow_controller),
-            ).await?;
+            )
+            .await?;
             with_db_timeout_void(
                 "load_db_only_aliases",
                 load_db_only_aliases(pool, &self.alias_store),
-            ).await?;
+            )
+            .await?;
             with_db_timeout_void(
                 "load_db_only_plans",
                 self.plan_store.load_db_only_plans(pool),
-            ).await?;
+            )
+            .await?;
         }
 
         self.register_fusion_models(&new_config)?;
@@ -529,12 +543,12 @@ impl AppState {
                 self.prompt_log_writer.update_config(pc);
             }
         } else {
-            self.prompt_log_writer.update_config(boom_promptlog::PromptLogConfig::default());
+            self.prompt_log_writer
+                .update_config(boom_promptlog::PromptLogConfig::default());
         }
 
         // 6. Build new inner state.
-        let new_inner =
-            Self::build_inner(new_config, &db_pool, old_started_at, new_reload_count)?;
+        let new_inner = Self::build_inner(new_config, &db_pool, old_started_at, new_reload_count)?;
 
         // 7. Atomic swap.
         self.inner.store(Arc::new(new_inner));
@@ -590,7 +604,7 @@ impl AppState {
         let ttl_secs = config.router_settings.kvc_aware.router_ttl_secs;
         // 0 = TTL prune disabled: rely on LRU (max_blocks) alone. Skip spawning the sweeper
         // (also avoids Duration::from_secs_f64 on a non-positive value).
-        if !(ttl_secs > 0.0) {
+        if ttl_secs <= 0.0 {
             tracing::info!("KV TTL prune disabled (router_ttl_secs=0), using LRU only");
             return;
         }
@@ -610,7 +624,11 @@ impl AppState {
             }
         });
         *self.kv_prune_handle.lock().unwrap() = Some(handle);
-        tracing::info!(ttl_secs, sweep_secs = interval.as_secs_f64(), "KV TTL prune task spawned");
+        tracing::info!(
+            ttl_secs,
+            sweep_secs = interval.as_secs_f64(),
+            "KV TTL prune task spawned"
+        );
     }
 
     /// Abort the running TTL prune task (if any). Called before respawning on reload.
@@ -662,9 +680,7 @@ impl AppState {
             self.request_rate.clone(),
             self.kv_index.clone(),
             config.router_settings.enable_priority_header,
-            config
-                .router_settings
-                .flow_control_queue_timeout_secs(),
+            config.router_settings.flow_control_queue_timeout_secs(),
         );
         register_fusion_providers(
             &config.workflow_settings,
@@ -792,7 +808,10 @@ fn merge_runtime_sections(
             .map_err(|e| format!("set model_list: {}", e))?;
     }
 
-    if let Some(aliases) = obj.get("router_settings").and_then(|r| r.get("model_group_alias")) {
+    if let Some(aliases) = obj
+        .get("router_settings")
+        .and_then(|r| r.get("model_group_alias"))
+    {
         let yaml_val = json_to_yaml(aliases)?;
         boom_config::set_yaml_path(root, &["router_settings", "model_group_alias"], yaml_val)
             .map_err(|e| format!("set model_group_alias: {}", e))?;
@@ -871,10 +890,17 @@ where
     }
 }
 
-async fn sync_yaml_to_db(pool: &PgPool, config: &Config, plan_store: &Arc<PlanStore>) -> Result<(), sqlx::Error> {
+async fn sync_yaml_to_db(
+    pool: &PgPool,
+    config: &Config,
+    plan_store: &Arc<PlanStore>,
+) -> Result<(), sqlx::Error> {
     // ── Deployments (delegated to DeploymentStore) ──
-    let yaml_model_names: Vec<String> = config.model_list.iter()
-        .map(|e| e.model_name.clone()).collect();
+    let yaml_model_names: Vec<String> = config
+        .model_list
+        .iter()
+        .map(|e| e.model_name.clone())
+        .collect();
     let mut yaml_deployments: Vec<boom_routing::DeploymentInput> = Vec::new();
     for entry in &config.model_list {
         let p = &entry.litellm_params;
@@ -896,20 +922,29 @@ async fn sync_yaml_to_db(pool: &PgPool, config: &Config, plan_store: &Arc<PlanSt
             temperature: p.temperature,
             max_tokens: p.max_tokens.map(|v| v as i32),
             deployment_id: entry.model_info.as_ref().and_then(|mi| mi.id.clone()),
-            quota_count_ratio: entry.model_info.as_ref()
+            quota_count_ratio: entry
+                .model_info
+                .as_ref()
                 .and_then(|mi| mi.quota_count_ratio)
                 .map(|v| v as i64)
                 .unwrap_or(1),
-            max_inflight_queue_len: entry.flow_control.as_ref()
-                .and_then(|fc| fc.model_queue_limit).map(|v| v as i32),
-            max_context_len: entry.flow_control.as_ref()
-                .and_then(|fc| fc.model_context_limit).map(|v| v as i64),
+            max_inflight_queue_len: entry
+                .flow_control
+                .as_ref()
+                .and_then(|fc| fc.model_queue_limit)
+                .map(|v| v as i32),
+            max_context_len: entry
+                .flow_control
+                .as_ref()
+                .and_then(|fc| fc.model_context_limit)
+                .map(|v| v as i64),
             enabled: entry.enabled,
             client_type_header: entry.client_type_header,
             serve_not_match: entry.serve_not_match,
-            model_info: entry.model_info.as_ref().map(|mi| {
-                serde_json::to_value(mi).unwrap_or(serde_json::Value::Null)
-            }),
+            model_info: entry
+                .model_info
+                .as_ref()
+                .map(|mi| serde_json::to_value(mi).unwrap_or(serde_json::Value::Null)),
         };
         yaml_deployments.push(d);
 
@@ -923,25 +958,33 @@ async fn sync_yaml_to_db(pool: &PgPool, config: &Config, plan_store: &Arc<PlanSt
     // Add "*" to yaml_model_names if any entry uses serve_not_match,
     // so sync_yaml_to_db cleans up conflicting source='db' rows.
     let mut all_model_names = yaml_model_names;
-    if config.model_list.iter().any(|e| e.serve_not_match) {
-        if !all_model_names.contains(&"*".to_string()) {
-            all_model_names.push("*".to_string());
-        }
+    if config.model_list.iter().any(|e| e.serve_not_match)
+        && !all_model_names.contains(&"*".to_string())
+    {
+        all_model_names.push("*".to_string());
     }
     DeploymentStore::sync_yaml_to_db(pool, &all_model_names, &yaml_deployments).await?;
 
     // ── Aliases (delegated to AliasStore) ──
-    let yaml_aliases: Vec<(String, String, bool)> = config.router_settings.model_group_alias.iter()
-        .map(|(alias, cfg)| (alias.clone(), cfg.target_model().to_string(), cfg.is_hidden()))
+    let yaml_aliases: Vec<(String, String, bool)> = config
+        .router_settings
+        .model_group_alias
+        .iter()
+        .map(|(alias, cfg)| {
+            (
+                alias.clone(),
+                cfg.target_model().to_string(),
+                cfg.is_hidden(),
+            )
+        })
         .collect();
     AliasStore::sync_yaml_to_db(pool, &yaml_aliases).await?;
 
     // ── Plans (delegated to PlanStore) ──
     // plan_store already has RateLimitPlan objects loaded by load_plans_from_config.
     let all_plans = plan_store.list_plans();
-    let yaml_plans: Vec<(String, &RateLimitPlan)> = all_plans.iter()
-        .map(|p| (p.name.clone(), p))
-        .collect();
+    let yaml_plans: Vec<(String, &RateLimitPlan)> =
+        all_plans.iter().map(|p| (p.name.clone(), p)).collect();
     let default_plan = config.plan_settings.default_plan.as_deref();
     PlanStore::sync_yaml_to_db(pool, &yaml_plans, default_plan).await?;
 
@@ -951,7 +994,6 @@ async fn sync_yaml_to_db(pool: &PgPool, config: &Config, plan_store: &Arc<PlanSt
 // ═══════════════════════════════════════════════════════════
 // DB-only loading (source='db' records on top of YAML stores)
 // ═══════════════════════════════════════════════════════════
-
 
 /// Build providers from DB deployment rows and add to DeploymentStore.
 /// Uses DeploymentStore::load_db_only_rows() for SQL, creates providers here
@@ -1008,7 +1050,11 @@ async fn load_db_only_deployments(
                 deployment_count += 1;
             }
             Err(e) => {
-                tracing::error!("Failed to create provider for model '{}': {}", row.model_name, e);
+                tracing::error!(
+                    "Failed to create provider for model '{}': {}",
+                    row.model_name,
+                    e
+                );
             }
         }
     }
@@ -1030,10 +1076,13 @@ async fn load_db_only_deployments(
             let max_inflight = row.max_inflight_queue_len.unwrap_or(0) as u32;
             let max_context = row.max_context_len.unwrap_or(0) as u64;
             if max_inflight > 0 || max_context > 0 {
-                flow_controller.ensure_slot(did, &FlowControlConfig {
-                    max_inflight,
-                    max_context,
-                });
+                flow_controller.ensure_slot(
+                    did,
+                    &FlowControlConfig {
+                        max_inflight,
+                        max_context,
+                    },
+                );
             }
         }
     }
@@ -1069,7 +1118,6 @@ async fn validate_db_workflow_namespace(
     ))
 }
 
-
 // ═══════════════════════════════════════════════════════════
 // YAML → Memory (no-DB fallback)
 // ═══════════════════════════════════════════════════════════
@@ -1092,7 +1140,9 @@ fn build_deployments_from_config(config: &Config, deployment_store: &Arc<Deploym
         let deployment_id = entry.model_info.as_ref().and_then(|mi| mi.id.clone());
 
         // Extract quota_count_ratio from model_info (default 1).
-        let ratio = entry.model_info.as_ref()
+        let ratio = entry
+            .model_info
+            .as_ref()
             .and_then(|mi| mi.quota_count_ratio)
             .unwrap_or(1);
 
@@ -1140,10 +1190,11 @@ fn build_deployments_from_config(config: &Config, deployment_store: &Arc<Deploym
                 // accounting on small requests.
                 if let Some(info) = entry.model_info.as_ref() {
                     use rust_decimal::prelude::FromPrimitive;
-                    let per_million_to_per_token = |v: Option<f64>| -> Option<rust_decimal::Decimal> {
-                        v.and_then(rust_decimal::Decimal::from_f64)
-                            .map(|d| d / rust_decimal::Decimal::from(1_000_000))
-                    };
+                    let per_million_to_per_token =
+                        |v: Option<f64>| -> Option<rust_decimal::Decimal> {
+                            v.and_then(rust_decimal::Decimal::from_f64)
+                                .map(|d| d / rust_decimal::Decimal::from(1_000_000))
+                        };
 
                     // Template lookup is the only source of rates now.
                     let template_rates = info.cost_template.as_ref().and_then(|tn| {
@@ -1254,10 +1305,13 @@ fn seed_flow_controller_from_config(config: &Config, flow_controller: &Arc<FlowC
         let max_context = fc.model_context_limit.unwrap_or(0);
 
         if max_inflight > 0 || max_context > 0 {
-            flow_controller.ensure_slot(&deployment_id, &FlowControlConfig {
-                max_inflight,
-                max_context,
-            });
+            flow_controller.ensure_slot(
+                &deployment_id,
+                &FlowControlConfig {
+                    max_inflight,
+                    max_context,
+                },
+            );
             active_ids.push(deployment_id.clone());
             tracing::info!(
                 deployment_id = %deployment_id,
@@ -1338,7 +1392,9 @@ fn load_plans_from_config(plan_store: &Arc<PlanStore>, config: &Config) {
         }
         None => {
             plan_store.set_default_team_plan(None);
-            tracing::info!("没有默认 team 套餐配置，未显式分配 plan 的 team 将不受 team 维度限制。");
+            tracing::info!(
+                "没有默认 team 套餐配置，未显式分配 plan 的 team 将不受 team 维度限制。"
+            );
         }
     }
 }
@@ -1492,7 +1548,8 @@ fn normalize_window_limits(raw: &serde_json::Value) -> Vec<serde_json::Value> {
         inner: Vec<boom_core::types::WindowLimit>,
     }
 
-    let wrapper = serde_json::from_value::<WindowLimitsWrapper>(serde_json::json!({ "inner": raw }));
+    let wrapper =
+        serde_json::from_value::<WindowLimitsWrapper>(serde_json::json!({ "inner": raw }));
     match wrapper {
         Ok(w) => w
             .inner
@@ -1537,7 +1594,10 @@ async fn build_config_snapshot_value(pool: &PgPool) -> Result<serde_json::Value,
             if let Some(tpm) = r.tpm {
                 litellm_params.insert("tpm".into(), serde_json::Value::Number(tpm.into()));
             }
-            litellm_params.insert("timeout".into(), serde_json::Value::Number(r.timeout.into()));
+            litellm_params.insert(
+                "timeout".into(),
+                serde_json::Value::Number(r.timeout.into()),
+            );
             if let Some(t) = r.temperature {
                 litellm_params.insert(
                     "temperature".into(),
@@ -1573,15 +1633,21 @@ async fn build_config_snapshot_value(pool: &PgPool) -> Result<serde_json::Value,
             if r.max_inflight_queue_len.is_some() || r.max_context_len.is_some() {
                 let mut fc = serde_json::Map::new();
                 if let Some(v) = r.max_inflight_queue_len {
-                    fc.insert("model_queue_limit".into(), serde_json::Value::Number(v.into()));
+                    fc.insert(
+                        "model_queue_limit".into(),
+                        serde_json::Value::Number(v.into()),
+                    );
                 }
                 if let Some(v) = r.max_context_len {
-                    fc.insert("model_context_limit".into(), serde_json::Value::Number(v.into()));
+                    fc.insert(
+                        "model_context_limit".into(),
+                        serde_json::Value::Number(v.into()),
+                    );
                 }
-                entry.as_object_mut().unwrap().insert(
-                    "flow_control".into(),
-                    serde_json::Value::Object(fc),
-                );
+                entry
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("flow_control".into(), serde_json::Value::Object(fc));
             }
 
             // ── model_info: deserialize DB JSONB through the ModelInfo schema
@@ -1618,25 +1684,25 @@ async fn build_config_snapshot_value(pool: &PgPool) -> Result<serde_json::Value,
                 }
             }
             if !mi.is_empty() {
-                entry.as_object_mut().unwrap().insert(
-                    "model_info".into(),
-                    serde_json::Value::Object(mi),
-                );
+                entry
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("model_info".into(), serde_json::Value::Object(mi));
             }
 
             // ── Behavior toggles. serde defaults are false, so emit only
             // when true to keep YAML noise-free.
             if r.serve_not_match {
-                entry.as_object_mut().unwrap().insert(
-                    "serve_not_match".into(),
-                    serde_json::Value::Bool(true),
-                );
+                entry
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("serve_not_match".into(), serde_json::Value::Bool(true));
             }
             if r.client_type_header.unwrap_or(false) {
-                entry.as_object_mut().unwrap().insert(
-                    "client_type_header".into(),
-                    serde_json::Value::Bool(true),
-                );
+                entry
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("client_type_header".into(), serde_json::Value::Bool(true));
             }
 
             // ── Enabled flag. Unlike the toggles above, ModelEntry.enabled
@@ -1644,10 +1710,10 @@ async fn build_config_snapshot_value(pool: &PgPool) -> Result<serde_json::Value,
             // would make reload fall back to the default and silently lose
             // the disabled state (the very bug we're fixing).
             if !r.enabled.unwrap_or(true) {
-                entry.as_object_mut().unwrap().insert(
-                    "enabled".into(),
-                    serde_json::Value::Bool(false),
-                );
+                entry
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("enabled".into(), serde_json::Value::Bool(false));
             }
 
             entry
@@ -1687,7 +1753,10 @@ async fn build_config_snapshot_value(pool: &PgPool) -> Result<serde_json::Value,
                             slot.insert("hours".into(), serde_json::Value::String(h.to_string()));
                         }
                         if let Some(v) = obj.get("concurrency_limit").and_then(|v| v.as_u64()) {
-                            slot.insert("concurrency_limit".into(), serde_json::Value::Number(v.into()));
+                            slot.insert(
+                                "concurrency_limit".into(),
+                                serde_json::Value::Number(v.into()),
+                            );
                         }
                         if let Some(v) = obj.get("rpm_limit").and_then(|v| v.as_u64()) {
                             slot.insert("rpm_limit".into(), serde_json::Value::Number(v.into()));
@@ -1695,7 +1764,10 @@ async fn build_config_snapshot_value(pool: &PgPool) -> Result<serde_json::Value,
                         if let Some(raw_wl) = obj.get("window_limits") {
                             let normalized = normalize_window_limits(raw_wl);
                             if !normalized.is_empty() {
-                                slot.insert("window_limits".into(), serde_json::Value::Array(normalized));
+                                slot.insert(
+                                    "window_limits".into(),
+                                    serde_json::Value::Array(normalized),
+                                );
                             }
                         }
                         Some(serde_json::Value::Object(slot))
@@ -1706,12 +1778,18 @@ async fn build_config_snapshot_value(pool: &PgPool) -> Result<serde_json::Value,
 
         let mut plan_obj = serde_json::Map::new();
         let type_str = r.r#type.as_deref().unwrap_or("key");
-        plan_obj.insert("type".into(), serde_json::Value::String(type_str.to_string()));
+        plan_obj.insert(
+            "type".into(),
+            serde_json::Value::String(type_str.to_string()),
+        );
         if let Some(mp) = &r.member_plan {
             plan_obj.insert("member_plan".into(), serde_json::Value::String(mp.clone()));
         }
         if let Some(cl) = r.concurrency_limit {
-            plan_obj.insert("concurrency_limit".into(), serde_json::Value::Number(cl.into()));
+            plan_obj.insert(
+                "concurrency_limit".into(),
+                serde_json::Value::Number(cl.into()),
+            );
         }
         if let Some(rpm) = r.rpm_limit {
             plan_obj.insert("rpm_limit".into(), serde_json::Value::Number(rpm.into()));
@@ -1720,10 +1798,16 @@ async fn build_config_snapshot_value(pool: &PgPool) -> Result<serde_json::Value,
             plan_obj.insert("tpm_limit".into(), serde_json::Value::Number(tpm.into()));
         }
         if !window_limits.is_empty() {
-            plan_obj.insert("window_limits".into(), serde_json::Value::Array(window_limits));
+            plan_obj.insert(
+                "window_limits".into(),
+                serde_json::Value::Array(window_limits),
+            );
         }
         if let Some(tok) = r.total_token_limit {
-            plan_obj.insert("total_token_limit".into(), serde_json::Value::Number(tok.into()));
+            plan_obj.insert(
+                "total_token_limit".into(),
+                serde_json::Value::Number(tok.into()),
+            );
         }
         if let Some(cost_micros) = r.total_cost_limit_micros {
             let cost = rust_decimal::Decimal::from(cost_micros.max(0))

@@ -13,6 +13,12 @@ pub struct RequestRateTracker {
     counters: DashMap<String, Arc<RebalanceCounter>>,
 }
 
+impl Default for RequestRateTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RequestRateTracker {
     pub fn new() -> Self {
         let counters = DashMap::new();

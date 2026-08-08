@@ -192,12 +192,24 @@ impl Default for DeploymentHealthCheckSettings {
     }
 }
 
-fn default_health_check_path() -> String { "/metric".to_string() }
-fn default_failure_threshold() -> u32 { 3 }
-fn default_recovery_threshold() -> u32 { 2 }
-fn default_offline_check_interval_secs() -> u64 { 30 }
-fn default_recovery_check_interval_secs() -> u64 { 60 }
-fn default_request_failure_threshold() -> u32 { 3 }
+fn default_health_check_path() -> String {
+    "/metric".to_string()
+}
+fn default_failure_threshold() -> u32 {
+    3
+}
+fn default_recovery_threshold() -> u32 {
+    2
+}
+fn default_offline_check_interval_secs() -> u64 {
+    30
+}
+fn default_recovery_check_interval_secs() -> u64 {
+    60
+}
+fn default_request_failure_threshold() -> u32 {
+    3
+}
 
 /// Re-export of `boom_core::types::PlanType` so config consumers don't need
 /// to depend on boom-limiter. Defined in boom-core as the single source of truth.
@@ -234,10 +246,7 @@ pub struct PlanConfig {
     pub rpm_limit: Option<u64>,
     #[serde(default)]
     pub tpm_limit: Option<u64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_window_limit_vec"
-    )]
+    #[serde(default, deserialize_with = "deserialize_window_limit_vec")]
     pub window_limits: Vec<WindowLimit>,
     #[serde(default)]
     pub total_token_limit: Option<u64>,
@@ -274,10 +283,7 @@ pub struct ScheduleSlotConfig {
     pub rpm_limit: Option<u64>,
     #[serde(default)]
     pub tpm_limit: Option<u64>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_window_limit_vec"
-    )]
+    #[serde(default, deserialize_with = "deserialize_window_limit_vec")]
     pub window_limits: Vec<WindowLimit>,
 }
 
@@ -479,7 +485,7 @@ fn auto_detect_provider(model: &str) -> String {
     "openai".to_string()
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct GeneralSettings {
     /// Master key for admin access.
     pub master_key: Option<String>,
@@ -494,17 +500,6 @@ pub struct GeneralSettings {
     /// Add new universally-available models here instead of updating every key.
     #[serde(default)]
     pub public_models: Vec<String>,
-}
-
-impl Default for GeneralSettings {
-    fn default() -> Self {
-        Self {
-            master_key: None,
-            database_url: None,
-            store_model_in_db: false,
-            public_models: Vec::new(),
-        }
-    }
 }
 
 /// Model alias configuration — supports both simple string and extended format with `hidden`.
@@ -562,7 +557,10 @@ pub struct RouterSettings {
     /// per-request at the scoring stage. Default: 20.
     /// (serde alias keeps the old `key_affinity_rebalance_threshold` name
     /// working for existing configs.)
-    #[serde(default = "default_rebalance_threshold", alias = "key_affinity_rebalance_threshold")]
+    #[serde(
+        default = "default_rebalance_threshold",
+        alias = "key_affinity_rebalance_threshold"
+    )]
     pub rebalance_threshold: u8,
     /// Content-based hybrid router (optional dynamic model alias).
     #[serde(default)]
@@ -937,7 +935,10 @@ pub fn load_config(path: &str) -> Result<Config, GatewayError> {
         p.api_key = p.api_key.take().map(|v| resolve_env_value(&v));
         p.api_base = p.api_base.take().map(|v| resolve_env_value(&v));
         p.aws_access_key_id = p.aws_access_key_id.take().map(|v| resolve_env_value(&v));
-        p.aws_secret_access_key = p.aws_secret_access_key.take().map(|v| resolve_env_value(&v));
+        p.aws_secret_access_key = p
+            .aws_secret_access_key
+            .take()
+            .map(|v| resolve_env_value(&v));
         for v in p.headers.values_mut() {
             *v = resolve_env_value(v);
         }
@@ -945,7 +946,10 @@ pub fn load_config(path: &str) -> Result<Config, GatewayError> {
 
     // Validate the shared rebalance threshold when a policy that uses it is
     // active (key_affinity applies it per-key; kvc_aware at scoring stage).
-    if matches!(config.router_settings.schedule_policy.as_str(), "key_affinity" | "kvc_aware") {
+    if matches!(
+        config.router_settings.schedule_policy.as_str(),
+        "key_affinity" | "kvc_aware"
+    ) {
         let t = config.router_settings.rebalance_threshold;
         if t == 0 || t > 100 {
             return Err(GatewayError::ConfigError(format!(
@@ -978,7 +982,7 @@ fn resolve_env_vars_in_text(text: &str) -> String {
                     result.push_str(
                         &env::var(var_name).unwrap_or_else(|_| format!("${{{}}}", var_name)),
                     );
-                    while let Some((j, _)) = chars.next() {
+                    for (j, _) in chars.by_ref() {
                         if j >= end {
                             break;
                         }
@@ -1056,17 +1060,20 @@ pub fn write_yaml_atomic(path: &str, value: &serde_yaml::Value) -> Result<(), Ga
         .map_err(|e| GatewayError::ConfigError(format!("Failed to serialize YAML: {}", e)))?;
 
     let tmp_path = format!("{}.tmp", path);
-    std::fs::write(&tmp_path, &yaml_str)
-        .map_err(|e| GatewayError::ConfigError(format!("Failed to write tmp file {}: {}", tmp_path, e)))?;
+    std::fs::write(&tmp_path, &yaml_str).map_err(|e| {
+        GatewayError::ConfigError(format!("Failed to write tmp file {}: {}", tmp_path, e))
+    })?;
 
-    let file = std::fs::File::open(&tmp_path)
-        .map_err(|e| GatewayError::ConfigError(format!("Failed to open tmp file for fsync: {}", e)))?;
+    let file = std::fs::File::open(&tmp_path).map_err(|e| {
+        GatewayError::ConfigError(format!("Failed to open tmp file for fsync: {}", e))
+    })?;
     file.sync_all()
         .map_err(|e| GatewayError::ConfigError(format!("Failed to fsync tmp file: {}", e)))?;
     drop(file);
 
-    std::fs::rename(&tmp_path, path)
-        .map_err(|e| GatewayError::ConfigError(format!("Failed to rename tmp file to {}: {}", path, e)))?;
+    std::fs::rename(&tmp_path, path).map_err(|e| {
+        GatewayError::ConfigError(format!("Failed to rename tmp file to {}: {}", path, e))
+    })?;
 
     Ok(())
 }
@@ -1101,7 +1108,10 @@ pub fn set_yaml_path(
             return Ok(());
         }
         if !mapping.contains_key(&key) {
-            mapping.insert(key.clone(), serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+            mapping.insert(
+                key.clone(),
+                serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+            );
         }
         current = mapping.get_mut(&key).unwrap();
     }
@@ -1278,32 +1288,56 @@ mod tests {
 
         // router_ttl_secs: 0 = valid (disables TTL prune); negative / NaN / ±∞ → reject.
         config.router_settings.kvc_aware.router_ttl_secs = 0.0;
-        assert!(config.validate().is_ok(), "router_ttl_secs=0 should be valid (disables TTL)");
+        assert!(
+            config.validate().is_ok(),
+            "router_ttl_secs=0 should be valid (disables TTL)"
+        );
         config.router_settings.kvc_aware.router_ttl_secs = -1.0;
-        assert!(config.validate().is_err(), "negative ttl should be rejected");
+        assert!(
+            config.validate().is_err(),
+            "negative ttl should be rejected"
+        );
         config.router_settings.kvc_aware.router_ttl_secs = f64::NAN;
         assert!(config.validate().is_err(), "NaN ttl should be rejected");
         config.router_settings.kvc_aware.router_ttl_secs = f64::INFINITY;
-        assert!(config.validate().is_err(), "infinite ttl should be rejected");
+        assert!(
+            config.validate().is_err(),
+            "infinite ttl should be rejected"
+        );
         config.router_settings.kvc_aware.router_ttl_secs = 120.0;
 
         // block_size = 0 → reject (trie would be silently inert).
         config.router_settings.kvc_aware.block_size = 0;
-        assert!(config.validate().is_err(), "block_size=0 should be rejected");
+        assert!(
+            config.validate().is_err(),
+            "block_size=0 should be rejected"
+        );
         config.router_settings.kvc_aware.block_size = 512;
 
         // max_blocks = 0 → reject (silent 500_000 fallback otherwise).
         config.router_settings.kvc_aware.max_blocks = 0;
-        assert!(config.validate().is_err(), "max_blocks=0 should be rejected");
+        assert!(
+            config.validate().is_err(),
+            "max_blocks=0 should be rejected"
+        );
         config.router_settings.kvc_aware.max_blocks = 500_000;
 
         // cache_weight out of [0,1] → reject (NaN rejected too: contains() is false for NaN).
         config.router_settings.kvc_aware.cache_weight = 1.5;
-        assert!(config.validate().is_err(), "cache_weight=1.5 should be rejected");
+        assert!(
+            config.validate().is_err(),
+            "cache_weight=1.5 should be rejected"
+        );
         config.router_settings.kvc_aware.cache_weight = -0.1;
-        assert!(config.validate().is_err(), "negative cache_weight should be rejected");
+        assert!(
+            config.validate().is_err(),
+            "negative cache_weight should be rejected"
+        );
         config.router_settings.kvc_aware.cache_weight = f64::NAN;
-        assert!(config.validate().is_err(), "NaN cache_weight should be rejected");
+        assert!(
+            config.validate().is_err(),
+            "NaN cache_weight should be rejected"
+        );
 
         // Boundary: cache_weight=1.0, load_weight=0.0 (sum=1.0) is valid.
         config.router_settings.kvc_aware.cache_weight = 1.0;
@@ -1485,7 +1519,9 @@ plan_settings:
         // File should exist with expected content; no .tmp leftover.
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("127.0.0.1"));
-        assert!(!std::path::Path::exists(path.with_extension("yaml.tmp").as_ref()));
+        assert!(!std::path::Path::exists(
+            path.with_extension("yaml.tmp").as_ref()
+        ));
 
         let _ = std::fs::remove_file(&path);
     }

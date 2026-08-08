@@ -32,7 +32,10 @@ impl FromRequestParts<AppState> for RequiredAuth {
         let raw_key = extract_api_key(parts);
 
         let raw_key = raw_key.ok_or_else(|| {
-            GatewayErrorReply(GatewayError::AuthError("Missing API key".to_string()), false)
+            GatewayErrorReply(
+                GatewayError::AuthError("Missing API key".to_string()),
+                false,
+            )
         })?;
 
         let inner = state.inner.load();
@@ -47,10 +50,7 @@ impl FromRequestParts<AppState> for RequiredAuth {
             PreAuthOutcome::NoHook | PreAuthOutcome::Continue => raw_key,
             PreAuthOutcome::Replace(new_key) => new_key,
             PreAuthOutcome::Reject(reason) => {
-                return Err(GatewayErrorReply(
-                    GatewayError::AuthError(reason),
-                    false,
-                ));
+                return Err(GatewayErrorReply(GatewayError::AuthError(reason), false));
             }
             PreAuthOutcome::Deny => {
                 return Err(GatewayErrorReply(

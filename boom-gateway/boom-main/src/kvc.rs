@@ -16,13 +16,13 @@
 //! Rate limiting (plan_charge) stays in the handler scope — it is NOT passed
 //! into this module. The two-phase commit (peek → commit) is preserved.
 
+use arc_swap::ArcSwap;
+use boom_config::Config;
 use boom_core::kv_event::{KvIndexBackend, StorageTier};
 use boom_core::provider::Provider;
 use boom_core::types::ChatCompletionRequest;
-use boom_config::Config;
 use boom_routing::Router;
 use std::sync::Arc;
-use arc_swap::ArcSwap;
 use tokio::sync::Semaphore;
 
 /// Result of kvc-aware routing. When kvc is disabled or no match found,
@@ -165,7 +165,7 @@ impl KvcOrchestrator {
         };
         let kv_hit_blocks = selection.kv_hit_blocks;
         let kv_input_blocks = selection.kv_input_blocks;
-        let trie_max_blocks = config.router_settings.kvc_aware.max_blocks.max(0) as i64;
+        let trie_max_blocks = config.router_settings.kvc_aware.max_blocks as i64;
         let trie_blocks = Some(kv_index.block_count() as i64);
 
         // ── Step 5: record (learn) — best-effort, off the request path. ──

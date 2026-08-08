@@ -96,6 +96,11 @@ impl AliasStore {
         self.aliases.len()
     }
 
+    /// Whether there are no aliases.
+    pub fn is_empty(&self) -> bool {
+        self.aliases.is_empty()
+    }
+
     /// Number of hidden aliases.
     pub fn hidden_count(&self) -> usize {
         self.hidden.len()
@@ -144,10 +149,7 @@ impl AliasStore {
             }
         }
 
-        tracing::info!(
-            "Synced {} alias(es) from YAML to DB",
-            yaml_aliases.len()
-        );
+        tracing::info!("Synced {} alias(es) from YAML to DB", yaml_aliases.len());
         Ok(())
     }
 
@@ -236,7 +238,12 @@ impl AliasStore {
     }
 
     /// Update an alias in DB and memory.
-    pub async fn update_db(&self, pool: &PgPool, alias_name: &str, input: &AliasInput) -> Result<bool, sqlx::Error> {
+    pub async fn update_db(
+        &self,
+        pool: &PgPool,
+        alias_name: &str,
+        input: &AliasInput,
+    ) -> Result<bool, sqlx::Error> {
         let result = sqlx::query(
             r#"UPDATE boom_model_alias
                SET target_model = $2, hidden = $3, updated_at = NOW()
@@ -263,12 +270,10 @@ impl AliasStore {
 
     /// Delete an alias from DB and memory. Returns true if existed.
     pub async fn delete_db(&self, pool: &PgPool, alias_name: &str) -> Result<bool, sqlx::Error> {
-        let result = sqlx::query(
-            r#"DELETE FROM boom_model_alias WHERE alias_name = $1"#,
-        )
-        .bind(alias_name)
-        .execute(pool)
-        .await?;
+        let result = sqlx::query(r#"DELETE FROM boom_model_alias WHERE alias_name = $1"#)
+            .bind(alias_name)
+            .execute(pool)
+            .await?;
 
         if result.rows_affected() > 0 {
             self.remove_alias(alias_name);

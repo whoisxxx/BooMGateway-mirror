@@ -32,6 +32,7 @@ fn to_minute(secs: u64) -> u64 {
 }
 
 impl RebalanceCounter {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let now = to_minute(now_epoch_secs());
         Self {
@@ -143,16 +144,12 @@ impl RebalanceMoveTracker {
         let mut map = self.inner.lock().unwrap();
         if let Some(id) = from_id {
             if !id.is_empty() {
-                map.entry(id.to_string())
-                    .or_insert_with(MoveCounts::default)
-                    .out_count += 1;
+                map.entry(id.to_string()).or_default().out_count += 1;
             }
         }
         if let Some(id) = to_id {
             if !id.is_empty() {
-                map.entry(id.to_string())
-                    .or_insert_with(MoveCounts::default)
-                    .in_count += 1;
+                map.entry(id.to_string()).or_default().in_count += 1;
             }
         }
     }
@@ -297,7 +294,11 @@ mod tests {
         let t = RebalanceMoveTracker::new();
         t.record_move(Some("c"), Some("a"));
         t.record_move(Some("b"), Some("d"));
-        let s: Vec<String> = t.snapshot().iter().map(|m| m.deployment_id.clone()).collect();
+        let s: Vec<String> = t
+            .snapshot()
+            .iter()
+            .map(|m| m.deployment_id.clone())
+            .collect();
         assert_eq!(s, vec!["a", "b", "c", "d"]);
     }
 

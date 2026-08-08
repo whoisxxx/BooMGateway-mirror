@@ -126,10 +126,7 @@ pub fn build_router<S: Clone + Send + Sync + 'static>(state: DashboardState) -> 
             put(handlers_admin::update_alias).delete(handlers_admin::delete_alias),
         )
         // Admin — Request Logs.
-        .route(
-            "/dashboard/api/admin/logs",
-            get(handlers_admin::list_logs),
-        )
+        .route("/dashboard/api/admin/logs", get(handlers_admin::list_logs))
         // Admin — In-Flight Request Stats (real-time, includes flow control).
         .route(
             "/dashboard/api/admin/stats/inflight",
@@ -284,9 +281,7 @@ pub fn build_router<S: Clone + Send + Sync + 'static>(state: DashboardState) -> 
 /// the only thing still gated by the feature (see handlers_static.rs).
 ///
 /// State is injected via the same Extension layer used by the main router.
-fn debug_router<S: Clone + Send + Sync + 'static>(
-    state: Arc<DashboardState>,
-) -> Router<S> {
+fn debug_router<S: Clone + Send + Sync + 'static>(state: Arc<DashboardState>) -> Router<S> {
     // debug_router is merged AFTER the main router's Extension layer (see
     // build_router), so that layer does not cover these routes. Attach the
     // state Extension here, otherwise handlers extracting

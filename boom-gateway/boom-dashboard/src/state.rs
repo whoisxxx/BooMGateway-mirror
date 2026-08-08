@@ -1,10 +1,12 @@
 use boom_core::provider::KeyAliasLookup;
 use boom_core::DebugErrorStore;
+use boom_ctxaware::AgentStatsTracker;
 use boom_flowcontrol::FlowController;
 use boom_limiter::{PlanStore, SlidingWindowLimiter};
 use boom_promptlog::PromptLogWriter;
-use boom_routing::{AliasStore, DeploymentStore, InFlightTracker, RebalanceMoveTracker, RequestRateTracker};
-use boom_ctxaware::AgentStatsTracker;
+use boom_routing::{
+    AliasStore, DeploymentStore, InFlightTracker, RebalanceMoveTracker, RequestRateTracker,
+};
 use dashmap::DashMap;
 use serde_json::Value;
 use sqlx::PgPool;
@@ -119,6 +121,7 @@ pub struct DashboardState {
 }
 
 impl DashboardState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db_pool: Option<PgPool>,
         plan_store: Arc<PlanStore>,

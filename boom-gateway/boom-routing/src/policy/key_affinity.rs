@@ -2,9 +2,9 @@ use boom_core::provider::{DeploymentQueueInfo, Provider};
 use dashmap::DashMap;
 use std::sync::Arc;
 
+use super::SchedulePolicy;
 use crate::inflight::InFlightTracker;
 use crate::rebalance::RebalanceMoveTracker;
-use super::SchedulePolicy;
 
 /// Key-affinity scheduling: route requests from the same API key to the same
 /// provider deployment for a given model, with load-aware rebalancing.
@@ -88,7 +88,8 @@ impl SchedulePolicy for KeyAffinityPolicy {
 
             if total_input < self.context_threshold {
                 // Warm-up: pick lowest-load and record affinity.
-                let provider = select_lowest_load(&self.tracker, &self.queue_info, model, candidates);
+                let provider =
+                    select_lowest_load(&self.tracker, &self.queue_info, model, candidates);
                 if let Some(ref p) = provider {
                     if let Some(did) = p.deployment_id() {
                         self.affinity.insert(affinity_key, did.to_string());
@@ -102,8 +103,7 @@ impl SchedulePolicy for KeyAffinityPolicy {
         // Clone the value immediately to release the DashMap read guard
         // before any subsequent insert() — holding a Ref while inserting
         // into the same shard causes a parking_lot::RwLock self-deadlock.
-        let preferred_id = self.affinity.get(&affinity_key)
-            .map(|r| r.value().clone());
+        let preferred_id = self.affinity.get(&affinity_key).map(|r| r.value().clone());
 
         if let Some(ref preferred_id) = preferred_id {
             // Find the preferred provider in candidates.
@@ -114,16 +114,15 @@ impl SchedulePolicy for KeyAffinityPolicy {
             }) {
                 // Rebalance check: if the preferred provider is significantly
                 // more loaded than the least-loaded candidate, reassign.
-                let load_preferred = load_for_deployment(&self.tracker, &self.queue_info, model, provider.as_ref());
-                let (min_load, least_loaded) = min_load_candidate(&self.tracker, &self.queue_info, model, candidates);
+                let load_preferred =
+                    load_for_deployment(&self.tracker, &self.queue_info, model, provider.as_ref());
+                let (min_load, least_loaded) =
+                    min_load_candidate(&self.tracker, &self.queue_info, model, candidates);
 
                 if should_rebalance(load_preferred, min_load, self.rebalance_threshold as u64) {
                     // Rebalance to least loaded.
                     if let Some(ref tracker) = self.rebalance_move_tracker {
-                        tracker.record_move(
-                            provider.deployment_id(),
-                            least_loaded.deployment_id(),
-                        );
+                        tracker.record_move(provider.deployment_id(), least_loaded.deployment_id());
                     }
                     let from_id = preferred_id.clone();
                     let to_id = least_loaded.deployment_id().map(|s| s.to_string());
@@ -169,7 +168,9 @@ impl SchedulePolicy for KeyAffinityPolicy {
     }
 }
 
-use super::load_helpers::{deployment_load, min_load_candidate, select_lowest_load, should_rebalance};
+use super::load_helpers::{
+    deployment_load, min_load_candidate, select_lowest_load, should_rebalance,
+};
 
 /// First 8 chars of the key hash — enough to correlate logs for the same user
 /// without logging the full key hash (privacy / log noise).

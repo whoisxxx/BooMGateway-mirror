@@ -111,11 +111,15 @@ pub struct ProviderCallContext {
 #[async_trait]
 pub trait Provider: Send + Sync + 'static {
     /// Non-streaming chat completion.
-    async fn chat(&self, request: ChatCompletionRequest) -> Result<ChatCompletionResponse, GatewayError>;
+    async fn chat(
+        &self,
+        request: ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse, GatewayError>;
 
     /// Streaming chat completion. Returns an SSE byte stream from the upstream provider,
     /// already transformed into OpenAI-compatible chunks.
-    async fn chat_stream(&self, request: ChatCompletionRequest) -> Result<ChatStream, GatewayError>;
+    async fn chat_stream(&self, request: ChatCompletionRequest)
+        -> Result<ChatStream, GatewayError>;
 
     /// Context-aware entry point used by the gateway route. Ordinary providers
     /// use the direct implementation; virtual providers can override it to
@@ -177,7 +181,7 @@ pub trait Provider: Send + Sync + 'static {
 /// it cannot be expressed as a single `check_and_record` method because the
 /// caller must drive commit/settle at distinct moments (post-accept and
 /// post-stream-done).
-
+///
 /// Narrow trait for looking up key aliases by token hashes.
 /// Separated from Authenticator so that consumers (e.g. Dashboard) don't
 /// depend on the full authentication interface.

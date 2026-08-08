@@ -10,7 +10,10 @@ use crate::state::AppState;
 
 /// Background task: receives AdminCommand from dashboard and executes writes.
 /// Has access to AppState (db_pool, deployment_store, boom-provider, boom-config).
-pub async fn admin_command_handler(mut rx: tokio::sync::mpsc::Receiver<AdminCommand>, state: AppState) {
+pub async fn admin_command_handler(
+    mut rx: tokio::sync::mpsc::Receiver<AdminCommand>,
+    state: AppState,
+) {
     tracing::info!("Admin command handler started");
     while let Some(cmd) = rx.recv().await {
         match cmd {
@@ -22,10 +25,14 @@ pub async fn admin_command_handler(mut rx: tokio::sync::mpsc::Receiver<AdminComm
                 // needs to know about (rather than seeing a fake 200 OK).
                 if result.is_ok() {
                     if let Err(e) = state.persist_config_in_place().await {
-                        augment_with_warning(&mut result, format!(
-                            "DB write succeeded but config did not reload: {}. \
-                             Use the Reload button to retry.", e
-                        ));
+                        augment_with_warning(
+                            &mut result,
+                            format!(
+                                "DB write succeeded but config did not reload: {}. \
+                             Use the Reload button to retry.",
+                                e
+                            ),
+                        );
                     }
                 }
                 let _ = reply.send(result);
@@ -34,10 +41,14 @@ pub async fn admin_command_handler(mut rx: tokio::sync::mpsc::Receiver<AdminComm
                 let mut result = handle_update_model(&state, id, req).await;
                 if result.is_ok() {
                     if let Err(e) = state.persist_config_in_place().await {
-                        augment_with_warning(&mut result, format!(
-                            "DB write succeeded but config did not reload: {}. \
-                             Use the Reload button to retry.", e
-                        ));
+                        augment_with_warning(
+                            &mut result,
+                            format!(
+                                "DB write succeeded but config did not reload: {}. \
+                             Use the Reload button to retry.",
+                                e
+                            ),
+                        );
                     }
                 }
                 let _ = reply.send(result);
@@ -46,10 +57,14 @@ pub async fn admin_command_handler(mut rx: tokio::sync::mpsc::Receiver<AdminComm
                 let mut result = handle_delete_model(&state, id).await;
                 if result.is_ok() {
                     if let Err(e) = state.persist_config_in_place().await {
-                        augment_with_warning(&mut result, format!(
-                            "DB write succeeded but config did not reload: {}. \
-                             Use the Reload button to retry.", e
-                        ));
+                        augment_with_warning(
+                            &mut result,
+                            format!(
+                                "DB write succeeded but config did not reload: {}. \
+                             Use the Reload button to retry.",
+                                e
+                            ),
+                        );
                     }
                 }
                 let _ = reply.send(result);
@@ -63,18 +78,16 @@ pub async fn admin_command_handler(mut rx: tokio::sync::mpsc::Receiver<AdminComm
                     );
                 }
             }
-            AdminCommand::ReloadConfig { reply } => {
-                match state.reload().await {
-                    Ok(summary) => {
-                        tracing::info!("Config hot-reloaded via dashboard: {}", summary);
-                        let _ = reply.send(Ok(summary));
-                    }
-                    Err(e) => {
-                        tracing::error!("Config hot-reload failed: {}", e);
-                        let _ = reply.send(Err(format!("Reload failed: {}", e)));
-                    }
+            AdminCommand::ReloadConfig { reply } => match state.reload().await {
+                Ok(summary) => {
+                    tracing::info!("Config hot-reloaded via dashboard: {}", summary);
+                    let _ = reply.send(Ok(summary));
                 }
-            }
+                Err(e) => {
+                    tracing::error!("Config hot-reload failed: {}", e);
+                    let _ = reply.send(Err(format!("Reload failed: {}", e)));
+                }
+            },
             AdminCommand::UpdateConfigSection { path, value, reply } => {
                 let result = state.update_config_section(&path, value).await;
                 let _ = reply.send(result);
@@ -108,10 +121,7 @@ pub async fn admin_command_handler(mut rx: tokio::sync::mpsc::Receiver<AdminComm
 fn augment_with_warning(result: &mut Result<Value, String>, warning: String) {
     if let Ok(json) = result {
         if let Some(obj) = json.as_object_mut() {
-            obj.insert(
-                "warning".into(),
-                serde_json::Value::String(warning),
-            );
+            obj.insert("warning".into(), serde_json::Value::String(warning));
         }
     }
 }
@@ -230,10 +240,7 @@ fn ensure_not_workflow_model(state: &AppState, model_name: &str) -> Result<(), S
     Ok(())
 }
 
-async fn handle_delete_model(
-    state: &AppState,
-    id: Uuid,
-) -> Result<Value, String> {
+async fn handle_delete_model(state: &AppState, id: Uuid) -> Result<Value, String> {
     let db_pool = state.db_pool.as_ref().ok_or("Database not available")?;
 
     let info = DeploymentStore::delete_db(db_pool, id)

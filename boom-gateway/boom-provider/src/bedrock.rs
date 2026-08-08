@@ -1,7 +1,7 @@
+use async_trait::async_trait;
 use boom_core::provider::Provider;
 use boom_core::types::*;
 use boom_core::GatewayError;
-use async_trait::async_trait;
 use reqwest::Client;
 
 /// AWS Bedrock provider.
@@ -18,7 +18,13 @@ pub struct BedrockProvider {
 }
 
 impl BedrockProvider {
-    pub fn new(client: Client, model: &str, region: &str, deployment_id: Option<String>, client_type_header: bool) -> Self {
+    pub fn new(
+        client: Client,
+        model: &str,
+        region: &str,
+        deployment_id: Option<String>,
+        client_type_header: bool,
+    ) -> Self {
         Self {
             client,
             model: model.to_string(),
@@ -39,7 +45,10 @@ impl BedrockProvider {
 
 #[async_trait]
 impl Provider for BedrockProvider {
-    async fn chat(&self, _req: ChatCompletionRequest) -> Result<ChatCompletionResponse, GatewayError> {
+    async fn chat(
+        &self,
+        _req: ChatCompletionRequest,
+    ) -> Result<ChatCompletionResponse, GatewayError> {
         // TODO: Implement AWS SigV4 request signing.
         // This requires either the aws-sdk-bedrockruntime crate or a manual SigV4 implementation.
         Err(GatewayError::ProviderError(

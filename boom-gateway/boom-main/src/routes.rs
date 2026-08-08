@@ -14,8 +14,8 @@ use boom_core::GatewayError;
 use boom_ctxaware::AgentStatsTracker;
 use boom_flowcontrol::{FlowControlError, FlowControlledStream};
 use boom_limiter::{
-    decimal_to_micros, micros_to_decimal, ConcurrencyGuard, CumulativeKind,
-    GuardedStream, PlanStore, QuotaScope, RateLimitPlan,
+    decimal_to_micros, micros_to_decimal, ConcurrencyGuard, CumulativeKind, GuardedStream,
+    PlanStore, QuotaScope, RateLimitPlan,
 };
 use boom_promptlog::{PromptLogEntry, PromptLogStream};
 use boom_routing::{InFlightGuard, ModelCostRate, Router};
@@ -28,7 +28,10 @@ use std::time::Instant;
 
 /// Extract client IP from request headers with TCP fallback.
 /// Priority: X-Real-IP > X-Forwarded-For (first IP) > TCP remote addr > "unknown".
-fn extract_client_ip(headers: &axum::http::HeaderMap, remote_addr: Option<std::net::SocketAddr>) -> String {
+fn extract_client_ip(
+    headers: &axum::http::HeaderMap,
+    remote_addr: Option<std::net::SocketAddr>,
+) -> String {
     // Try X-Real-IP first (set by nginx etc.)
     if let Some(val) = headers.get("X-Real-IP").and_then(|v| v.to_str().ok()) {
         let ip = val.trim();
@@ -55,6 +58,7 @@ fn extract_client_ip(headers: &axum::http::HeaderMap, remote_addr: Option<std::n
 /// Acquire flow control guard for a deployment.
 /// Returns Ok(Some(guard)) if acquired, Ok(None) if no slot (pass-through),
 /// or Err with appropriate error reply.
+#[allow(clippy::too_many_arguments)]
 async fn acquire_fc_guard<E>(
     state: &AppState,
     deployment_id: &str,
@@ -73,28 +77,74 @@ async fn acquire_fc_guard<E>(
     client_ip: Option<String>,
     err_wrap: impl Fn(GatewayError, bool) -> E,
 ) -> Result<Option<boom_flowcontrol::FlowControlGuard>, E> {
-    match state.flow_controller.acquire(deployment_id, context_chars, timeout, is_vip, key_alias, fc_key_hash, fc_model).await {
+    match state
+        .flow_controller
+        .acquire(
+            deployment_id,
+            context_chars,
+            timeout,
+            is_vip,
+            key_alias,
+            fc_key_hash,
+            fc_model,
+        )
+        .await
+    {
         Ok(g) => Ok(Some(g)),
         Err(FlowControlError::Timeout { waiters, .. }) => {
             let e = GatewayError::FlowControlQueueTimeout {
                 deployment_id: deployment_id.to_string(),
                 waiters,
-                message: format!("Deployment '{}' flow control queue timeout — too many concurrent requests", deployment_id),
+                message: format!(
+                    "Deployment '{}' flow control queue timeout — too many concurrent requests",
+                    deployment_id
+                ),
             };
-            log_error(state, identity, model, api_path, is_stream, start, &e, Some(request_id.to_string()), Some(deployment_id.to_string()), None, client_ip);
+            log_error(
+                state,
+                identity,
+                model,
+                api_path,
+                is_stream,
+                start,
+                &e,
+                Some(request_id.to_string()),
+                Some(deployment_id.to_string()),
+                None,
+                client_ip,
+            );
             Err(err_wrap(e, is_stream))
         }
         Err(FlowControlError::NoSlot) => Ok(None),
-        Err(FlowControlError::ContextExceeded { deployment_id: _, context_chars, max_context }) => {
+        Err(FlowControlError::ContextExceeded {
+            deployment_id: _,
+            context_chars,
+            max_context,
+        }) => {
             let e = GatewayError::RateLimitExceeded {
                 retry_after_secs: None,
-                message: format!("Request context ({} chars) exceeds deployment max_context limit ({} chars)", context_chars, max_context),
+                message: format!(
+                    "Request context ({} chars) exceeds deployment max_context limit ({} chars)",
+                    context_chars, max_context
+                ),
                 limit_type: "flow_control_context",
                 scope: None,
                 scope_id: None,
                 plan_name: None,
             };
-            log_error(state, identity, model, api_path, is_stream, start, &e, Some(request_id.to_string()), Some(deployment_id.to_string()), None, client_ip);
+            log_error(
+                state,
+                identity,
+                model,
+                api_path,
+                is_stream,
+                start,
+                &e,
+                Some(request_id.to_string()),
+                Some(deployment_id.to_string()),
+                None,
+                client_ip,
+            );
             Err(err_wrap(e, is_stream))
         }
     }
@@ -133,10 +183,7 @@ fn effective_key_limits(
         .rpm_limit
         .or(Some(cfg.default_rpm))
         .filter(|v| *v > 0);
-    let tpm = identity
-        .tpm_limit
-        .or(cfg.default_tpm)
-        .filter(|v| *v > 0);
+    let tpm = identity.tpm_limit.or(cfg.default_tpm).filter(|v| *v > 0);
     (rpm, tpm)
 }
 
@@ -207,7 +254,6 @@ fn fold_rpm_tpm_into_60s(
 // Debug logging — dump full request/response for specific keys
 // ═══════════════════════════════════════════════════════════
 
-
 // ============================================================
 // InFlightStream — wraps a stream with an InFlightGuard so the
 // guard is released when the stream is fully consumed or dropped.
@@ -220,7 +266,10 @@ struct InFlightStream<S> {
 
 impl<S> InFlightStream<S> {
     fn new(inner: S, guard: InFlightGuard) -> Self {
-        Self { inner, _guard: guard }
+        Self {
+            inner,
+            _guard: guard,
+        }
     }
 }
 
@@ -324,7 +373,9 @@ impl<S> Drop for LoggedStream<S> {
 
         if let Some(mut log) = self.log.take() {
             log.duration_ms = Some(self.start.elapsed().as_millis() as i32);
-            log.ttft_ms = self.first_token_at.map(|t| (t - self.start).as_millis() as i32);
+            log.ttft_ms = self
+                .first_token_at
+                .map(|t| (t - self.start).as_millis() as i32);
             log.input_tokens = input_tokens;
             log.output_tokens = output_tokens;
             log.cached_tokens = cached_tokens;
@@ -413,7 +464,15 @@ pub async fn chat_completions(
     ConnectInfo(remote_addr): ConnectInfo<std::net::SocketAddr>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<impl IntoResponse, GatewayErrorReply> {
-    chat_completions_inner(state, auth, &headers, Some(remote_addr), req, "/v1/chat/completions").await
+    chat_completions_inner(
+        state,
+        auth,
+        &headers,
+        Some(remote_addr),
+        req,
+        "/v1/chat/completions",
+    )
+    .await
 }
 
 /// Shared inner logic for chat completions and legacy completions.
@@ -436,10 +495,9 @@ async fn chat_completions_inner(
     tracing::info!(request_id = %request_id, model = %model, stream = is_stream, path = api_path, "chat_completions request started");
 
     // Prompt log: check early to avoid unnecessary cloning.
-    let prompt_log_should = state.prompt_log_writer.should_capture(
-        &identity.key_hash,
-        identity.team_id.as_deref(),
-    );
+    let prompt_log_should = state
+        .prompt_log_writer
+        .should_capture(&identity.key_hash, identity.team_id.as_deref());
     let prompt_log_req_body = if prompt_log_should {
         serde_json::to_value(&req).ok()
     } else {
@@ -451,21 +509,27 @@ async fn chat_completions_inner(
         None
     };
     // Clone request_id and model for prompt log (they get moved into RequestLog later).
-    let prompt_log_rid = if prompt_log_should { Some(request_id.clone()) } else { None };
-    let prompt_log_model = if prompt_log_should { Some(model.clone()) } else { None };
+    let prompt_log_rid = if prompt_log_should {
+        Some(request_id.clone())
+    } else {
+        None
+    };
+    let prompt_log_model = if prompt_log_should {
+        Some(model.clone())
+    } else {
+        None
+    };
     // Snapshot whitelisted request headers (only when configured). Empty
     // record_headers = capture nothing (security default to avoid leaking
     // Authorization/Cookie/etc). Header names lowercased on both sides.
-    let prompt_log_headers: Option<std::collections::HashMap<String, String>> = if prompt_log_should {
+    let prompt_log_headers: Option<std::collections::HashMap<String, String>> = if prompt_log_should
+    {
         let cfg = state.prompt_log_writer.config();
         if cfg.record_headers.is_empty() {
             None
         } else {
-            let allow: std::collections::HashSet<&str> = cfg
-                .record_headers
-                .iter()
-                .map(|s| s.as_str())
-                .collect();
+            let allow: std::collections::HashSet<&str> =
+                cfg.record_headers.iter().map(|s| s.as_str()).collect();
             let mut map = std::collections::HashMap::new();
             for (name, val) in headers.iter() {
                 let name_lower = name.as_str().to_lowercase();
@@ -475,23 +539,44 @@ async fn chat_completions_inner(
                     }
                 }
             }
-            if map.is_empty() { None } else { Some(map) }
+            if map.is_empty() {
+                None
+            } else {
+                Some(map)
+            }
         }
     } else {
         None
     };
 
     // 1. Model access check (deployment-aware, alias-aware).
-    check_model_access(identity, &req.model, &state.router, &inner.config.general_settings.public_models)
-        .map_err(|e| {
-            log_error(&state, &identity, &model, api_path, is_stream, start, &e, Some(request_id.clone()), None, None, Some(client_ip.clone()));
-            GatewayErrorReply(e, false)
-        })?;
+    check_model_access(
+        identity,
+        &req.model,
+        &state.router,
+        &inner.config.general_settings.public_models,
+    )
+    .map_err(|e| {
+        log_error(
+            &state,
+            identity,
+            &model,
+            api_path,
+            is_stream,
+            start,
+            &e,
+            Some(request_id.clone()),
+            None,
+            None,
+            Some(client_ip.clone()),
+        );
+        GatewayErrorReply(e, false)
+    })?;
 
     // 1b. Content-aware model resolution (hybrid router).
-    let resolved_model = state.router.resolve_request_model(
-        &req.model, &req.messages, &req.tools,
-    );
+    let resolved_model = state
+        .router
+        .resolve_request_model(&req.model, &req.messages, &req.tools);
 
     // 2. Plan-based or default rate limiting.
     let rate_limit_cfg = &inner.config.rate_limit;
@@ -521,21 +606,45 @@ async fn chat_completions_inner(
     )
     .await
     .map_err(|e| {
-        log_error(&state, &identity, &model, api_path, is_stream, start, &e, Some(request_id.clone()), None, None, Some(client_ip.clone()));
+        log_error(
+            &state,
+            identity,
+            &model,
+            api_path,
+            is_stream,
+            start,
+            &e,
+            Some(request_id.clone()),
+            None,
+            None,
+            Some(client_ip.clone()),
+        );
         GatewayErrorReply(e, false)
     })?;
 
-    let input_chars: usize = req.messages.iter().map(|m| match &m.content {
-        boom_core::types::MessageContent::Text(t) => t.len(),
-        boom_core::types::MessageContent::Parts(parts) => parts.iter().map(|p| match p {
-            boom_core::types::ContentPart::Text { text } => text.len(),
-            _ => 0,
-        }).sum(),
-        boom_core::types::MessageContent::Null => 0,
-    }).sum();
+    let input_chars: usize = req
+        .messages
+        .iter()
+        .map(|m| match &m.content {
+            boom_core::types::MessageContent::Text(t) => t.len(),
+            boom_core::types::MessageContent::Parts(parts) => parts
+                .iter()
+                .map(|p| match p {
+                    boom_core::types::ContentPart::Text { text } => text.len(),
+                    _ => 0,
+                })
+                .sum(),
+            boom_core::types::MessageContent::Null => 0,
+        })
+        .sum();
     log_request_summary(
-        &request_id, identity, &model, input_chars, is_stream,
-        api_path, &plan_charge,
+        &request_id,
+        identity,
+        &model,
+        input_chars,
+        is_stream,
+        api_path,
+        &plan_charge,
     );
 
     // 3. Route (kvc-aware or default). All kvc business logic (tokenize +
@@ -543,32 +652,80 @@ async fn chat_completions_inner(
     //    gets a RouteResult or None (fallback). plan_charge is NOT passed in;
     //    it stays in the handler scope, preserving the two-phase commit.
     let candidates = state.router.candidates_for(&resolved_model);
-    let kvc_route = state.kvc_orchestrator.route(
-        &inner.config, &resolved_model, &identity.key_hash, input_chars as u64,
-        &req, candidates.as_ref().map(|c| c.as_slice()).unwrap_or(&[]),
-    )
-    .await;
+    let kvc_route = state
+        .kvc_orchestrator
+        .route(
+            &inner.config,
+            &resolved_model,
+            &identity.key_hash,
+            input_chars as u64,
+            &req,
+            candidates.as_deref().unwrap_or(&[]),
+        )
+        .await;
 
-    let (provider, deployment_id, inflight_model,
-        schedule_policy, kv_hit_blocks, kv_input_blocks,
-        trie_blocks, trie_max_blocks, request_bytes) = match kvc_route {
-        Some(r) => {
-            (r.provider, r.deployment_id, r.inflight_model.unwrap_or_default(),
-             r.schedule_policy, r.kv_hit_blocks, r.kv_input_blocks,
-             r.trie_blocks, r.trie_max_blocks, r.request_bytes)
-        }
+    let (
+        provider,
+        deployment_id,
+        inflight_model,
+        schedule_policy,
+        kv_hit_blocks,
+        kv_input_blocks,
+        trie_blocks,
+        trie_max_blocks,
+        request_bytes,
+    ) = match kvc_route {
+        Some(r) => (
+            r.provider,
+            r.deployment_id,
+            r.inflight_model.unwrap_or_default(),
+            r.schedule_policy,
+            r.kv_hit_blocks,
+            r.kv_input_blocks,
+            r.trie_blocks,
+            r.trie_max_blocks,
+            r.request_bytes,
+        ),
         None => {
             // kvc disabled / no match — fallback to default routing
-            let selection = state.router.select_provider_with_prefix(
-                &resolved_model, Some(&identity.key_hash), input_chars as u64, &[],
-            ).ok_or_else(|| {
-                let e = GatewayError::ModelNotFound(resolved_model.clone());
-                log_error(&state, &identity, &model, api_path, is_stream, start, &e, Some(request_id.clone()), None, None, Some(client_ip.clone()));
-                GatewayErrorReply(e, false)
-            })?;
+            let selection = state
+                .router
+                .select_provider_with_prefix(
+                    &resolved_model,
+                    Some(&identity.key_hash),
+                    input_chars as u64,
+                    &[],
+                )
+                .ok_or_else(|| {
+                    let e = GatewayError::ModelNotFound(resolved_model.clone());
+                    log_error(
+                        &state,
+                        identity,
+                        &model,
+                        api_path,
+                        is_stream,
+                        start,
+                        &e,
+                        Some(request_id.clone()),
+                        None,
+                        None,
+                        Some(client_ip.clone()),
+                    );
+                    GatewayErrorReply(e, false)
+                })?;
             let did = selection.provider.deployment_id().map(|s| s.to_string());
             let im = state.router.resolve_model_name(&resolved_model);
-            (selection.provider, did, im, None, None, None, None, None, None)
+            (
+                selection.provider,
+                did,
+                im,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
         }
     };
 
@@ -576,16 +733,29 @@ async fn chat_completions_inner(
     let is_vip = is_vip_key(&identity.metadata);
     let fc_guard = if let Some(ref did) = deployment_id {
         acquire_fc_guard(
-            &state, did, input_chars as u64,
+            &state,
+            did,
+            input_chars as u64,
             std::time::Duration::from_secs(
-                inner.config.router_settings.flow_control_queue_timeout_secs()
+                inner
+                    .config
+                    .router_settings
+                    .flow_control_queue_timeout_secs(),
             ),
             is_vip,
-            identity.key_alias.clone(), Some(identity.key_hash.clone()),
+            identity.key_alias.clone(),
+            Some(identity.key_hash.clone()),
             Some(inflight_model.clone()),
-            api_path, &identity, &model,
-            is_stream, start, &request_id, Some(client_ip.clone()), GatewayErrorReply,
-        ).await?
+            api_path,
+            identity,
+            &model,
+            is_stream,
+            start,
+            &request_id,
+            Some(client_ip.clone()),
+            GatewayErrorReply,
+        )
+        .await?
     } else {
         None
     };
@@ -615,12 +785,28 @@ async fn chat_completions_inner(
 
     // 4. Route to provider (streaming or non-streaming).
     if is_stream {
-        let stream = match provider.chat_stream_with_context(req, provider_context).await {
+        let stream = match provider
+            .chat_stream_with_context(req, provider_context)
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 let partial_usage = provider_billing.actual_usage();
                 settle_partial_provider_accounting(&mut plan_charge, &provider_billing);
-                log_error_with_usage(&state, &identity, &model, api_path, true, start, &e, Some(request_id.clone()), deployment_id.clone(), debug_req_body.clone(), Some(client_ip.clone()), partial_usage.as_ref());
+                log_error_with_usage(
+                    &state,
+                    identity,
+                    &model,
+                    api_path,
+                    true,
+                    start,
+                    &e,
+                    Some(request_id.clone()),
+                    deployment_id.clone(),
+                    debug_req_body.clone(),
+                    Some(client_ip.clone()),
+                    partial_usage.as_ref(),
+                );
                 crate::health_monitor::record_request_failure(&state, &deployment_id, &e);
                 return Err(GatewayErrorReply(e, true));
             }
@@ -631,7 +817,12 @@ async fn chat_completions_inner(
         let usage = UsageTracker::default();
         let sse_stream = sse_stream_from_chat_stream(stream, usage.clone());
         let inflight_guard = if let Some(ref did) = deployment_id {
-            InFlightGuard::new_for_deployment(state.inflight.clone(), &inflight_model, did, input_chars as u64)
+            InFlightGuard::new_for_deployment(
+                state.inflight.clone(),
+                &inflight_model,
+                did,
+                input_chars as u64,
+            )
         } else {
             InFlightGuard::new(state.inflight.clone(), &inflight_model, input_chars as u64)
         };
@@ -650,33 +841,40 @@ async fn chat_completions_inner(
         }
 
         let api_path_owned = api_path.to_string();
-        let logged = LoggedStream::new(guarded, state.log_writer.clone(), RequestLog {
-            request_id: Some(request_id),
-            key_hash: identity.key_hash.clone(),
-            key_name: identity.key_name.clone(),
-            key_alias: identity.key_alias.clone(),
-            team_id: identity.team_id.clone(),
-            model,
-            model_name: Some(inflight_model.clone()),
-            api_path: api_path_owned,
-            is_stream: true,
-            status_code: 200,
-            error_type: None,
-            error_message: None,
-            input_tokens: None,
-            output_tokens: None,
-            duration_ms: None,
-            ttft_ms: None,
-            deployment_id,
-            client_ip: Some(client_ip.clone()),
-            cached_tokens: None,
-            schedule_policy: schedule_policy.clone(),
-            kv_hit_blocks,
-            kv_input_blocks,
-            trie_blocks,
-            trie_max_blocks,
-            request_tokens: request_bytes,
-        }, start, usage, Some(state.agent_stats.clone()))
+        let logged = LoggedStream::new(
+            guarded,
+            state.log_writer.clone(),
+            RequestLog {
+                request_id: Some(request_id),
+                key_hash: identity.key_hash.clone(),
+                key_name: identity.key_name.clone(),
+                key_alias: identity.key_alias.clone(),
+                team_id: identity.team_id.clone(),
+                model,
+                model_name: Some(inflight_model.clone()),
+                api_path: api_path_owned,
+                is_stream: true,
+                status_code: 200,
+                error_type: None,
+                error_message: None,
+                input_tokens: None,
+                output_tokens: None,
+                duration_ms: None,
+                ttft_ms: None,
+                deployment_id,
+                client_ip: Some(client_ip.clone()),
+                cached_tokens: None,
+                schedule_policy: schedule_policy.clone(),
+                kv_hit_blocks,
+                kv_input_blocks,
+                trie_blocks,
+                trie_max_blocks,
+                request_tokens: request_bytes,
+            },
+            start,
+            usage,
+            Some(state.agent_stats.clone()),
+        )
         .with_plan_charge(plan_charge)
         .with_provider_billing(provider_billing);
 
@@ -695,8 +893,15 @@ async fn chat_completions_inner(
                     Some(&client_ip),
                     prompt_log_headers.clone(),
                 );
-                let prompt_logged = PromptLogStream::new(logged, sender, prompt_entry, sse_raw_data_extractor(), None);
-                let response = Sse::new(sse_item_to_event(prompt_logged)).keep_alive(KeepAlive::default());
+                let prompt_logged = PromptLogStream::new(
+                    logged,
+                    sender,
+                    prompt_entry,
+                    sse_raw_data_extractor(),
+                    None,
+                );
+                let response =
+                    Sse::new(sse_item_to_event(prompt_logged)).keep_alive(KeepAlive::default());
                 return Ok(response.into_response());
             }
         }
@@ -704,7 +909,12 @@ async fn chat_completions_inner(
         Ok(response.into_response())
     } else {
         let _inflight = if let Some(ref did) = deployment_id {
-            InFlightGuard::new_for_deployment(state.inflight.clone(), &inflight_model, did, input_chars as u64)
+            InFlightGuard::new_for_deployment(
+                state.inflight.clone(),
+                &inflight_model,
+                did,
+                input_chars as u64,
+            )
         } else {
             InFlightGuard::new(state.inflight.clone(), &inflight_model, input_chars as u64)
         };
@@ -713,7 +923,20 @@ async fn chat_completions_inner(
             Err(e) => {
                 let partial_usage = provider_billing.actual_usage();
                 settle_partial_provider_accounting(&mut plan_charge, &provider_billing);
-                log_error_with_usage(&state, &identity, &model, api_path, false, start, &e, Some(request_id.clone()), deployment_id.clone(), debug_req_body.clone(), Some(client_ip.clone()), partial_usage.as_ref());
+                log_error_with_usage(
+                    &state,
+                    identity,
+                    &model,
+                    api_path,
+                    false,
+                    start,
+                    &e,
+                    Some(request_id.clone()),
+                    deployment_id.clone(),
+                    debug_req_body.clone(),
+                    Some(client_ip.clone()),
+                    partial_usage.as_ref(),
+                );
                 crate::health_monitor::record_request_failure(&state, &deployment_id, &e);
                 return Err(GatewayErrorReply(e, false));
             }
@@ -739,7 +962,7 @@ async fn chat_completions_inner(
             .unwrap_or(0);
         plan_charge.settle(
             input_tokens as u64,
-            cached_tokens_i64.max(0) as u64,
+            cached_tokens_i64 as u64,
             output_tokens as u64,
             provider_billing.actual_cost(),
         );
@@ -781,7 +1004,9 @@ async fn chat_completions_inner(
                 request_tokens: request_bytes,
             },
         );
-        state.agent_stats.record_tokens(api_path, input_tokens as u64, output_tokens as u64);
+        state
+            .agent_stats
+            .record_tokens(api_path, input_tokens as u64, output_tokens as u64);
 
         // Normalize internal ContentPart::Reasoning to standard OpenAI `reasoning_content`
         // field so clients receive {"reasoning_content": "..."} instead of non-standard
@@ -806,7 +1031,8 @@ async fn chat_completions_inner(
                     Some(client_ip.as_str()),
                     prompt_log_headers.clone(),
                 );
-                prompt_entry.set_response(serde_json::to_value(&resp).unwrap_or(serde_json::Value::Null));
+                prompt_entry
+                    .set_response(serde_json::to_value(&resp).unwrap_or(serde_json::Value::Null));
                 prompt_entry.set_status(200, duration_ms as u64);
                 let _ = sender.send(prompt_entry);
             }
@@ -828,7 +1054,15 @@ pub async fn completions(
     Json(req): Json<CompletionRequest>,
 ) -> Result<impl IntoResponse, GatewayErrorReply> {
     let chat_req = req.into_chat_request();
-    chat_completions_inner(state, auth, &headers, Some(remote_addr), chat_req, "/v1/completions").await
+    chat_completions_inner(
+        state,
+        auth,
+        &headers,
+        Some(remote_addr),
+        chat_req,
+        "/v1/completions",
+    )
+    .await
 }
 
 // ============================================================
@@ -897,13 +1131,17 @@ pub async fn get_model(
         true // Unrestricted key — check existence only.
     } else {
         // Restricted key — check if model_id is in the accessible set (including public_models).
-        all_names.iter()
+        all_names
+            .iter()
             .filter(|name| is_model_visible(name, &identity.models, &state.router, public_models))
             .any(|name| name == &model_id)
     };
 
     if !is_accessible || !all_names.iter().any(|n| n == &model_id) {
-        return Err(GatewayErrorReply(GatewayError::ModelNotFound(model_id), false));
+        return Err(GatewayErrorReply(
+            GatewayError::ModelNotFound(model_id),
+            false,
+        ));
     }
 
     Ok(Json(serde_json::json!({
@@ -924,15 +1162,30 @@ macro_rules! unsupported_handler {
             State(_state): State<AppState>,
             _auth: RequiredAuth,
         ) -> Result<axum::http::StatusCode, GatewayErrorReply> {
-            Err(GatewayErrorReply(GatewayError::NotSupported($label.to_string()), false))
+            Err(GatewayErrorReply(
+                GatewayError::NotSupported($label.to_string()),
+                false,
+            ))
         }
     };
 }
 
-unsupported_handler!(embeddings, "The /v1/embeddings endpoint is not supported by BooMGateway");
-unsupported_handler!(audio_speech, "The /v1/audio/speech endpoint is not supported by BooMGateway");
-unsupported_handler!(audio_transcriptions, "The /v1/audio/transcriptions endpoint is not supported by BooMGateway");
-unsupported_handler!(moderations, "The /v1/moderations endpoint is not supported by BooMGateway");
+unsupported_handler!(
+    embeddings,
+    "The /v1/embeddings endpoint is not supported by BooMGateway"
+);
+unsupported_handler!(
+    audio_speech,
+    "The /v1/audio/speech endpoint is not supported by BooMGateway"
+);
+unsupported_handler!(
+    audio_transcriptions,
+    "The /v1/audio/transcriptions endpoint is not supported by BooMGateway"
+);
+unsupported_handler!(
+    moderations,
+    "The /v1/moderations endpoint is not supported by BooMGateway"
+);
 
 // ============================================================
 // Health Check
@@ -1001,9 +1254,10 @@ pub async fn admin_reload_config(
     // Only master key can trigger reload.
     let identity = auth.identity();
     if identity.key_hash != "master" {
-        return Err(GatewayErrorReply(GatewayError::AuthError(
-            "Only master key can trigger config reload".to_string(),
-        ), false));
+        return Err(GatewayErrorReply(
+            GatewayError::AuthError("Only master key can trigger config reload".to_string()),
+            false,
+        ));
     }
 
     match state.reload().await {
@@ -1011,7 +1265,10 @@ pub async fn admin_reload_config(
             status: "ok".to_string(),
             message: summary,
         })),
-        Err(e) => Err(GatewayErrorReply(GatewayError::ConfigError(format!("Reload failed: {}", e)), false)),
+        Err(e) => Err(GatewayErrorReply(
+            GatewayError::ConfigError(format!("Reload failed: {}", e)),
+            false,
+        )),
     }
 }
 
@@ -1059,9 +1316,10 @@ pub async fn admin_delete_plan(
             "message": format!("Plan '{}' deleted", name),
         })))
     } else {
-        Err(GatewayErrorReply(GatewayError::ConfigError(format!("Plan '{}' not found",
-            name
-        )), false))
+        Err(GatewayErrorReply(
+            GatewayError::ConfigError(format!("Plan '{}' not found", name)),
+            false,
+        ))
     }
 }
 
@@ -1103,9 +1361,10 @@ pub async fn admin_unassign_key(
             "message": format!("Key '{}' unassigned", key_hash),
         })))
     } else {
-        Err(GatewayErrorReply(GatewayError::ConfigError(format!("Key '{}' not assigned to any plan",
-            key_hash
-        )), false))
+        Err(GatewayErrorReply(
+            GatewayError::ConfigError(format!("Key '{}' not assigned to any plan", key_hash)),
+            false,
+        ))
     }
 }
 
@@ -1128,11 +1387,13 @@ pub async fn admin_list_assignments(
     Ok(Json(serde_json::json!({ "assignments": data })))
 }
 
+#[allow(clippy::result_large_err)]
 fn require_master(identity: &AuthIdentity) -> Result<(), GatewayErrorReply> {
     if identity.key_hash != "master" {
-        return Err(GatewayErrorReply(GatewayError::AuthError(
-            "Only master key can manage plans".to_string(),
-        ), false));
+        return Err(GatewayErrorReply(
+            GatewayError::AuthError("Only master key can manage plans".to_string()),
+            false,
+        ));
     }
     Ok(())
 }
@@ -1230,7 +1491,9 @@ fn is_model_visible(
 ) -> bool {
     // Public model — always visible.
     if public_models.iter().any(|m| m == name)
-        || router.resolve_model(name).map_or(false, |target| public_models.iter().any(|m| m == &target))
+        || router
+            .resolve_model(name)
+            .is_some_and(|target| public_models.iter().any(|m| m == &target))
     {
         return true;
     }
@@ -1273,7 +1536,9 @@ fn check_model_access(
     // Public model — bypass all key-level whitelist checks.
     // Match both the requested name and its alias target (if any).
     let is_public = public_models.iter().any(|m| m == model)
-        || router.resolve_model(model).map_or(false, |target| public_models.iter().any(|m| m == &target));
+        || router
+            .resolve_model(model)
+            .is_some_and(|target| public_models.iter().any(|m| m == &target));
     if is_public {
         return Ok(());
     }
@@ -1282,7 +1547,8 @@ fn check_model_access(
     if identity.models.is_empty() {
         tracing::debug!(
             "check_model_access: key={:?}, model={}, result=allow (unrestricted)",
-            identity.key_name, model
+            identity.key_name,
+            model
         );
         return Ok(());
     }
@@ -1291,7 +1557,8 @@ fn check_model_access(
     if identity.models.iter().any(|m| m == model) {
         tracing::debug!(
             "check_model_access: key={:?}, model={}, result=allow (direct match)",
-            identity.key_name, model
+            identity.key_name,
+            model
         );
         return Ok(());
     }
@@ -1301,7 +1568,9 @@ fn check_model_access(
         if identity.models.iter().any(|m| m == &target) {
             tracing::debug!(
                 "check_model_access: key={:?}, model={}, result=allow (alias -> target={})",
-                identity.key_name, model, target
+                identity.key_name,
+                model,
+                target
             );
             return Ok(());
         }
@@ -1329,7 +1598,8 @@ fn check_model_access(
     if is_virtual {
         tracing::debug!(
             "check_model_access: key={:?}, model={}, result=allow (hybrid virtual model)",
-            identity.key_name, model
+            identity.key_name,
+            model
         );
         return Ok(());
     }
@@ -1345,7 +1615,8 @@ fn check_model_access(
     if has_wildcard {
         tracing::debug!(
             "check_model_access: key={:?}, model={}, result=allow (wildcard fallback)",
-            identity.key_name, model
+            identity.key_name,
+            model
         );
         return Ok(());
     }
@@ -1474,17 +1745,13 @@ impl PlanCharge {
         }
         self.settled = true;
 
-        let (regular_input_cost, cached_input_cost, output_cost) =
-            actual_cost.map_or_else(
-                || {
-                    self.cost_rate.compute_cost_breakdown(
-                        input_tokens,
-                        cached_tokens,
-                        output_tokens,
-                    )
-                },
-                |cost| (cost.regular_input, cost.cached_input, cost.output),
-            );
+        let (regular_input_cost, cached_input_cost, output_cost) = actual_cost.map_or_else(
+            || {
+                self.cost_rate
+                    .compute_cost_breakdown(input_tokens, cached_tokens, output_tokens)
+            },
+            |cost| (cost.regular_input, cost.cached_input, cost.output),
+        );
         let regular_input_micros = decimal_to_micros(regular_input_cost);
         let cached_input_micros = decimal_to_micros(cached_input_cost);
         let output_micros = decimal_to_micros(output_cost);
@@ -1502,11 +1769,9 @@ impl PlanCharge {
         );
 
         // Team dimension.
-        if let (Some(tk), Some(tw), Some(ts)) = (
-            &self.team_key,
-            &self.team_window_limits,
-            &self.team_scope,
-        ) {
+        if let (Some(tk), Some(tw), Some(ts)) =
+            (&self.team_key, &self.team_window_limits, &self.team_scope)
+        {
             self.limiter.settle_usage(
                 tk,
                 ts,
@@ -1572,7 +1837,9 @@ impl Drop for PlanCharge {
 /// If the model is an alias, resolves to the target model first.
 /// Returns the `quota_count_ratio` for the resolved model, defaulting to 1.
 fn resolve_quota_weight(model: &str, state: &AppState) -> u64 {
-    let resolved = state.router.resolve_model(model)
+    let resolved = state
+        .router
+        .resolve_model(model)
         .unwrap_or_else(|| model.to_string());
     state.deployment_store.get_quota_ratio(&resolved)
 }
@@ -1580,7 +1847,9 @@ fn resolve_quota_weight(model: &str, state: &AppState) -> u64 {
 /// Resolve the model name for cost-rate / quota attribution. Alias-resolved
 /// so the cost rate matches the actual upstream deployment.
 fn resolve_model_name(model: &str, state: &AppState) -> String {
-    state.router.resolve_model(model)
+    state
+        .router
+        .resolve_model(model)
         .unwrap_or_else(|| model.to_string())
 }
 
@@ -1773,7 +2042,8 @@ fn map_decision_to_err(
                     "team_cost_limit",
                     format!(
                         "Team '{}' cost limit exceeded. Plan: {}, Limit: ${}/min",
-                        scope_id, pn,
+                        scope_id,
+                        pn,
                         boom_limiter::micros_to_decimal(decision.limit)
                     ),
                 ),
@@ -1912,6 +2182,7 @@ fn map_decision_to_err(
 ///
 /// Reject if EITHER layer exceeds ANY configured limit. Team layer first
 /// (outer box). Returns a `PlanCharge` driving the subsequent commit + settle.
+#[allow(clippy::too_many_arguments)]
 async fn check_plan_limits(
     state: &AppState,
     plan_store: &Arc<PlanStore>,
@@ -1949,7 +2220,8 @@ async fn check_plan_limits(
     };
 
     // ── Resolve team plan (if team_id is set) ──
-    let team_plan: Option<RateLimitPlan> = team_id.and_then(|tid| plan_store.resolve_team_plan(tid));
+    let team_plan: Option<RateLimitPlan> =
+        team_id.and_then(|tid| plan_store.resolve_team_plan(tid));
 
     // If neither key nor team has a plan → fall back to legacy per-model RPM/TPM limits.
     // window_limits came from the global rate_limit config; rpm_limit/tpm_limit
@@ -2101,7 +2373,8 @@ async fn check_plan_limits(
     };
     let plan_name = key_plan_ref.map(|p| p.name.clone());
 
-    let key_concurrency_guard = if let (Some(limit), Some(_kp)) = (concurrency_limit, key_plan_ref) {
+    let key_concurrency_guard = if let (Some(limit), Some(_kp)) = (concurrency_limit, key_plan_ref)
+    {
         Some(plan_store.try_acquire(key_hash, limit).ok_or_else(|| {
             let msg = if let Some(pn) = plan_name.as_ref() {
                 format!("Concurrency limit exceeded. Plan: {}, Limit: {}", pn, limit)
@@ -2142,7 +2415,9 @@ async fn check_plan_limits(
     // path), use the legacy per-model fallback so the key still has its own
     // counts dimension guarding RPM.
     let key_decision = if let Some(kp) = key_plan_ref {
-        let d = limiter.peek_only(&key_rl_key, &plan_window_limits, weight).await;
+        let d = limiter
+            .peek_only(&key_rl_key, &plan_window_limits, weight)
+            .await;
         if !d.allowed {
             fail_key!(map_decision_to_err(
                 &d,
@@ -2189,7 +2464,9 @@ async fn check_plan_limits(
             key_hash: key_hash.to_string(),
             model: requested_model.to_string(),
         };
-        let d = limiter.peek_only(&fallback_key, &legacy_windows, weight).await;
+        let d = limiter
+            .peek_only(&fallback_key, &legacy_windows, weight)
+            .await;
         if !d.allowed {
             fail_key!(map_decision_to_err(
                 &d,
@@ -2261,7 +2538,9 @@ fn log_request_summary(
     api_path: &str,
     plan_charge: &PlanCharge,
 ) {
-    let key_display = identity.key_alias.as_deref()
+    let key_display = identity
+        .key_alias
+        .as_deref()
         .or(identity.key_name.as_deref())
         .or(identity.user_id.as_deref())
         .unwrap_or("-");
@@ -2291,7 +2570,8 @@ fn sse_stream_from_chat_stream(
 ) -> impl futures::Stream<Item = Result<SseItem, Infallible>> {
     let (tx, rx) = tokio::sync::mpsc::channel::<SseItem>(32);
     tokio::spawn(async move {
-        let mut tool_arg_buf: std::collections::HashMap<u32, String> = std::collections::HashMap::new();
+        let mut tool_arg_buf: std::collections::HashMap<u32, String> =
+            std::collections::HashMap::new();
         let mut stream = std::pin::pin!(stream);
         while let Some(result) = stream.next().await {
             match result {
@@ -2314,7 +2594,8 @@ fn sse_stream_from_chat_stream(
                     for choice in &mut chunk.choices {
                         if let Some(ref mut tool_calls) = choice.delta.tool_calls {
                             for tc in tool_calls.iter_mut() {
-                                let args_taken = tc.function.as_mut().and_then(|f| f.arguments.take());
+                                let args_taken =
+                                    tc.function.as_mut().and_then(|f| f.arguments.take());
                                 if let Some(args) = args_taken {
                                     if !args.is_empty() {
                                         // Fast path: incremental fragments almost never end with '}'.
@@ -2322,13 +2603,20 @@ fn sse_stream_from_chat_stream(
                                         // a complete object.
                                         let is_complete = args.starts_with('{')
                                             && args.ends_with('}')
-                                            && serde_json::from_str::<serde_json::Value>(&args).is_ok();
-                                        let has_existing = tool_arg_buf.get(&tc.index).map_or(false, |e| !e.is_empty());
+                                            && serde_json::from_str::<serde_json::Value>(&args)
+                                                .is_ok();
+                                        let has_existing = tool_arg_buf
+                                            .get(&tc.index)
+                                            .is_some_and(|e| !e.is_empty());
 
                                         if is_complete && has_existing {
-                                            tool_arg_buf.insert(tc.index, args); // move, no clone
+                                            tool_arg_buf.insert(tc.index, args);
+                                        // move, no clone
                                         } else {
-                                            tool_arg_buf.entry(tc.index).or_default().push_str(&args);
+                                            tool_arg_buf
+                                                .entry(tc.index)
+                                                .or_default()
+                                                .push_str(&args);
                                         }
                                     }
                                     // arguments already taken — chunk emits without them
@@ -2371,8 +2659,16 @@ fn sse_stream_from_chat_stream(
                                         usage: None,
                                         raw_data: None,
                                     };
-                                    let data = serde_json::to_string(&flush_chunk).unwrap_or_default();
-                                    if tx.send(SseItem { event: Event::default().data(&data), json_data: data }).await.is_err() {
+                                    let data =
+                                        serde_json::to_string(&flush_chunk).unwrap_or_default();
+                                    if tx
+                                        .send(SseItem {
+                                            event: Event::default().data(&data),
+                                            json_data: data,
+                                        })
+                                        .await
+                                        .is_err()
+                                    {
                                         return;
                                     }
                                 }
@@ -2382,7 +2678,14 @@ fn sse_stream_from_chat_stream(
 
                     // Emit the original chunk (arguments already taken).
                     let data = serde_json::to_string(&chunk).unwrap_or_default();
-                    if tx.send(SseItem { event: Event::default().data(&data), json_data: data }).await.is_err() {
+                    if tx
+                        .send(SseItem {
+                            event: Event::default().data(&data),
+                            json_data: data,
+                        })
+                        .await
+                        .is_err()
+                    {
                         return;
                     }
                 }
@@ -2391,7 +2694,12 @@ fn sse_stream_from_chat_stream(
                     let error_data =
                         serde_json::to_string(&serde_json::json!({"error": "Upstream error"}))
                             .unwrap_or_default();
-                    let _ = tx.send(SseItem { event: Event::default().data(&error_data), json_data: error_data }).await;
+                    let _ = tx
+                        .send(SseItem {
+                            event: Event::default().data(&error_data),
+                            json_data: error_data,
+                        })
+                        .await;
                 }
             }
         }
@@ -2436,11 +2744,11 @@ pub async fn messages(
     tracing::info!(request_id = %request_id, model = %model, stream = is_stream, "messages request started");
 
     // Prompt log: check early to avoid unnecessary cloning.
-    let prompt_log_should = state.prompt_log_writer.should_capture(
-        &identity.key_hash,
-        identity.team_id.as_deref(),
-    );
-    let prompt_log_capture_raw = prompt_log_should && state.prompt_log_writer.config().capture_raw_upstream;
+    let prompt_log_should = state
+        .prompt_log_writer
+        .should_capture(&identity.key_hash, identity.team_id.as_deref());
+    let prompt_log_capture_raw =
+        prompt_log_should && state.prompt_log_writer.config().capture_raw_upstream;
     let prompt_log_req_body = if prompt_log_should {
         serde_json::to_value(&req).ok()
     } else {
@@ -2452,21 +2760,27 @@ pub async fn messages(
         None
     };
     // Clone request_id and model for prompt log (they get moved into RequestLog later).
-    let prompt_log_rid = if prompt_log_should { Some(request_id.clone()) } else { None };
-    let prompt_log_model = if prompt_log_should { Some(model.clone()) } else { None };
+    let prompt_log_rid = if prompt_log_should {
+        Some(request_id.clone())
+    } else {
+        None
+    };
+    let prompt_log_model = if prompt_log_should {
+        Some(model.clone())
+    } else {
+        None
+    };
     // Snapshot whitelisted request headers (only when configured). Empty
     // record_headers = capture nothing (security default to avoid leaking
     // Authorization/Cookie/etc). Header names lowercased on both sides.
-    let prompt_log_headers: Option<std::collections::HashMap<String, String>> = if prompt_log_should {
+    let prompt_log_headers: Option<std::collections::HashMap<String, String>> = if prompt_log_should
+    {
         let cfg = state.prompt_log_writer.config();
         if cfg.record_headers.is_empty() {
             None
         } else {
-            let allow: std::collections::HashSet<&str> = cfg
-                .record_headers
-                .iter()
-                .map(|s| s.as_str())
-                .collect();
+            let allow: std::collections::HashSet<&str> =
+                cfg.record_headers.iter().map(|s| s.as_str()).collect();
             let mut map = std::collections::HashMap::new();
             for (name, val) in headers.iter() {
                 let name_lower = name.as_str().to_lowercase();
@@ -2476,22 +2790,45 @@ pub async fn messages(
                     }
                 }
             }
-            if map.is_empty() { None } else { Some(map) }
+            if map.is_empty() {
+                None
+            } else {
+                Some(map)
+            }
         }
     } else {
         None
     };
 
     // 1. Model access check (deployment-aware, alias-aware).
-    check_model_access(identity, &openai_req.model, &state.router, &inner.config.general_settings.public_models)
-        .map_err(|e| {
-            log_error(&state, &identity, &model, "/v1/messages", is_stream, start, &e, Some(request_id.clone()), None, None, Some(client_ip.clone()));
-            AnthropicErrorReply(e, is_stream)
-        })?;
+    check_model_access(
+        identity,
+        &openai_req.model,
+        &state.router,
+        &inner.config.general_settings.public_models,
+    )
+    .map_err(|e| {
+        log_error(
+            &state,
+            identity,
+            &model,
+            "/v1/messages",
+            is_stream,
+            start,
+            &e,
+            Some(request_id.clone()),
+            None,
+            None,
+            Some(client_ip.clone()),
+        );
+        AnthropicErrorReply(e, is_stream)
+    })?;
 
     // 1b. Content-aware model resolution (hybrid router).
     let resolved_model = state.router.resolve_request_model(
-        &openai_req.model, &openai_req.messages, &openai_req.tools,
+        &openai_req.model,
+        &openai_req.messages,
+        &openai_req.tools,
     );
 
     // 2. Plan-based or default rate limiting.
@@ -2517,20 +2854,44 @@ pub async fn messages(
     )
     .await
     .map_err(|e| {
-        log_error(&state, &identity, &model, "/v1/messages", is_stream, start, &e, Some(request_id.clone()), None, None, Some(client_ip.clone()));
+        log_error(
+            &state,
+            identity,
+            &model,
+            "/v1/messages",
+            is_stream,
+            start,
+            &e,
+            Some(request_id.clone()),
+            None,
+            None,
+            Some(client_ip.clone()),
+        );
         AnthropicErrorReply(e, is_stream)
     })?;
 
-    let input_chars: usize = req.messages.iter().map(|m| match &m.content {
-        boom_core::types::AnthropicContent::Text(t) => t.len(),
-        boom_core::types::AnthropicContent::Blocks(blocks) => blocks.iter().map(|b| match b {
-            boom_core::types::AnthropicContentBlock::Text { text, .. } => text.len(),
-            _ => 0,
-        }).sum(),
-    }).sum();
+    let input_chars: usize = req
+        .messages
+        .iter()
+        .map(|m| match &m.content {
+            boom_core::types::AnthropicContent::Text(t) => t.len(),
+            boom_core::types::AnthropicContent::Blocks(blocks) => blocks
+                .iter()
+                .map(|b| match b {
+                    boom_core::types::AnthropicContentBlock::Text { text, .. } => text.len(),
+                    _ => 0,
+                })
+                .sum(),
+        })
+        .sum();
     log_request_summary(
-        &request_id, identity, &model, input_chars, is_stream,
-        "/v1/messages", &plan_charge,
+        &request_id,
+        identity,
+        &model,
+        input_chars,
+        is_stream,
+        "/v1/messages",
+        &plan_charge,
     );
 
     // 3. Route (kvc-aware or default). All kvc business logic is inside
@@ -2540,32 +2901,80 @@ pub async fn messages(
     //    before the trie query, which would degrade every /v1/messages request
     //    to key_affinity and never request a full KV report.
     let candidates = state.router.candidates_for(&resolved_model);
-    let kvc_route = state.kvc_orchestrator.route(
-        &inner.config, &resolved_model, &identity.key_hash, input_chars as u64,
-        &openai_req, candidates.as_ref().map(|c| c.as_slice()).unwrap_or(&[]),
-    )
-    .await;
+    let kvc_route = state
+        .kvc_orchestrator
+        .route(
+            &inner.config,
+            &resolved_model,
+            &identity.key_hash,
+            input_chars as u64,
+            &openai_req,
+            candidates.as_deref().unwrap_or(&[]),
+        )
+        .await;
 
-    let (provider, deployment_id, inflight_model,
-        schedule_policy, kv_hit_blocks, kv_input_blocks,
-        trie_blocks, trie_max_blocks, request_bytes) = match kvc_route {
-        Some(r) => {
-            (r.provider, r.deployment_id, r.inflight_model.unwrap_or_default(),
-             r.schedule_policy, r.kv_hit_blocks, r.kv_input_blocks,
-             r.trie_blocks, r.trie_max_blocks, r.request_bytes)
-        }
+    let (
+        provider,
+        deployment_id,
+        inflight_model,
+        schedule_policy,
+        kv_hit_blocks,
+        kv_input_blocks,
+        trie_blocks,
+        trie_max_blocks,
+        request_bytes,
+    ) = match kvc_route {
+        Some(r) => (
+            r.provider,
+            r.deployment_id,
+            r.inflight_model.unwrap_or_default(),
+            r.schedule_policy,
+            r.kv_hit_blocks,
+            r.kv_input_blocks,
+            r.trie_blocks,
+            r.trie_max_blocks,
+            r.request_bytes,
+        ),
         None => {
             // kvc disabled / no match — fallback to default routing
-            let selection = state.router.select_provider_with_prefix(
-                &resolved_model, Some(&identity.key_hash), input_chars as u64, &[],
-            ).ok_or_else(|| {
-                let e = GatewayError::ModelNotFound(resolved_model.clone());
-                log_error(&state, &identity, &model, "/v1/messages", is_stream, start, &e, Some(request_id.clone()), None, None, Some(client_ip.clone()));
-                AnthropicErrorReply(e, is_stream)
-            })?;
+            let selection = state
+                .router
+                .select_provider_with_prefix(
+                    &resolved_model,
+                    Some(&identity.key_hash),
+                    input_chars as u64,
+                    &[],
+                )
+                .ok_or_else(|| {
+                    let e = GatewayError::ModelNotFound(resolved_model.clone());
+                    log_error(
+                        &state,
+                        identity,
+                        &model,
+                        "/v1/messages",
+                        is_stream,
+                        start,
+                        &e,
+                        Some(request_id.clone()),
+                        None,
+                        None,
+                        Some(client_ip.clone()),
+                    );
+                    AnthropicErrorReply(e, is_stream)
+                })?;
             let did = selection.provider.deployment_id().map(|s| s.to_string());
             let im = state.router.resolve_model_name(&resolved_model);
-            (selection.provider, did, im, None, None, None, None, None, None)
+            (
+                selection.provider,
+                did,
+                im,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
         }
     };
 
@@ -2573,16 +2982,29 @@ pub async fn messages(
     let is_vip = is_vip_key(&identity.metadata);
     let fc_guard = if let Some(ref did) = deployment_id {
         acquire_fc_guard(
-            &state, did, input_chars as u64,
+            &state,
+            did,
+            input_chars as u64,
             std::time::Duration::from_secs(
-                inner.config.router_settings.flow_control_queue_timeout_secs()
+                inner
+                    .config
+                    .router_settings
+                    .flow_control_queue_timeout_secs(),
             ),
             is_vip,
-            identity.key_alias.clone(), Some(identity.key_hash.clone()),
+            identity.key_alias.clone(),
+            Some(identity.key_hash.clone()),
             Some(inflight_model.clone()),
-            "/v1/messages", &identity, &model,
-            is_stream, start, &request_id, Some(client_ip.clone()), AnthropicErrorReply,
-        ).await?
+            "/v1/messages",
+            identity,
+            &model,
+            is_stream,
+            start,
+            &request_id,
+            Some(client_ip.clone()),
+            AnthropicErrorReply,
+        )
+        .await?
     } else {
         None
     };
@@ -2607,7 +3029,19 @@ pub async fn messages(
         let stream = match provider.chat_stream(openai_req).await {
             Ok(s) => s,
             Err(e) => {
-                log_error(&state, &identity, &model, "/v1/messages", true, start, &e, Some(request_id.clone()), deployment_id.clone(), debug_req_body.clone(), Some(client_ip.clone()));
+                log_error(
+                    &state,
+                    identity,
+                    &model,
+                    "/v1/messages",
+                    true,
+                    start,
+                    &e,
+                    Some(request_id.clone()),
+                    deployment_id.clone(),
+                    debug_req_body.clone(),
+                    Some(client_ip.clone()),
+                );
                 crate::health_monitor::record_request_failure(&state, &deployment_id, &e);
                 // plan_charge drops here without commit — no quota consumed.
                 return Err(AnthropicErrorReply(e, true));
@@ -2619,13 +3053,25 @@ pub async fn messages(
         let usage = UsageTracker::default();
         // Create shared buffer for raw upstream SSE chunks (before Anthropic transcoding).
         let raw_upstream_buf = if prompt_log_capture_raw {
-            Some(std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new())))
+            Some(std::sync::Arc::new(std::sync::Mutex::new(
+                Vec::<String>::new(),
+            )))
         } else {
             None
         };
-        let sse_stream = sse_stream_from_anthropic_chat_stream(stream, model.clone(), usage.clone(), raw_upstream_buf.clone());
+        let sse_stream = sse_stream_from_anthropic_chat_stream(
+            stream,
+            model.clone(),
+            usage.clone(),
+            raw_upstream_buf.clone(),
+        );
         let inflight_guard = if let Some(ref did) = deployment_id {
-            InFlightGuard::new_for_deployment(state.inflight.clone(), &inflight_model, did, input_chars as u64)
+            InFlightGuard::new_for_deployment(
+                state.inflight.clone(),
+                &inflight_model,
+                did,
+                input_chars as u64,
+            )
         } else {
             InFlightGuard::new(state.inflight.clone(), &inflight_model, input_chars as u64)
         };
@@ -2643,33 +3089,40 @@ pub async fn messages(
         }
 
         // Wrap with LoggedStream — log is written when stream finishes (Drop).
-        let logged = LoggedStream::new(guarded, state.log_writer.clone(), RequestLog {
-            request_id: Some(request_id),
-            key_hash: identity.key_hash.clone(),
-            key_name: identity.key_name.clone(),
-            key_alias: identity.key_alias.clone(),
-            team_id: identity.team_id.clone(),
-            model,
-            model_name: Some(inflight_model.clone()),
-            api_path: "/v1/messages".to_string(),
-            is_stream: true,
-            status_code: 200,
-            error_type: None,
-            error_message: None,
-            input_tokens: None,
-            output_tokens: None,
-            duration_ms: None, // filled by LoggedStream::drop
-            ttft_ms: None,
-            deployment_id,
-            client_ip: Some(client_ip.clone()),
-            cached_tokens: None,
-            schedule_policy: schedule_policy.clone(),
-            kv_hit_blocks,
-            kv_input_blocks,
-            trie_blocks,
-            trie_max_blocks,
-            request_tokens: request_bytes,
-        }, start, usage, Some(state.agent_stats.clone()))
+        let logged = LoggedStream::new(
+            guarded,
+            state.log_writer.clone(),
+            RequestLog {
+                request_id: Some(request_id),
+                key_hash: identity.key_hash.clone(),
+                key_name: identity.key_name.clone(),
+                key_alias: identity.key_alias.clone(),
+                team_id: identity.team_id.clone(),
+                model,
+                model_name: Some(inflight_model.clone()),
+                api_path: "/v1/messages".to_string(),
+                is_stream: true,
+                status_code: 200,
+                error_type: None,
+                error_message: None,
+                input_tokens: None,
+                output_tokens: None,
+                duration_ms: None, // filled by LoggedStream::drop
+                ttft_ms: None,
+                deployment_id,
+                client_ip: Some(client_ip.clone()),
+                cached_tokens: None,
+                schedule_policy: schedule_policy.clone(),
+                kv_hit_blocks,
+                kv_input_blocks,
+                trie_blocks,
+                trie_max_blocks,
+                request_tokens: request_bytes,
+            },
+            start,
+            usage,
+            Some(state.agent_stats.clone()),
+        )
         .with_plan_charge(plan_charge);
 
         // Wrap with prompt log stream if enabled, then wrap in Sse.
@@ -2684,11 +3137,18 @@ pub async fn messages(
                     "/v1/messages",
                     true,
                     req_body,
-                    Some(&client_ip.as_str()),
+                    Some(client_ip.as_str()),
                     prompt_log_headers.clone(),
                 );
-                let prompt_logged = PromptLogStream::new(logged, sender, prompt_entry, sse_raw_data_extractor(), raw_upstream_buf);
-                let response = Sse::new(sse_item_to_event(prompt_logged)).keep_alive(KeepAlive::default());
+                let prompt_logged = PromptLogStream::new(
+                    logged,
+                    sender,
+                    prompt_entry,
+                    sse_raw_data_extractor(),
+                    raw_upstream_buf,
+                );
+                let response =
+                    Sse::new(sse_item_to_event(prompt_logged)).keep_alive(KeepAlive::default());
                 return Ok(response.into_response());
             }
         }
@@ -2696,14 +3156,31 @@ pub async fn messages(
         Ok(response.into_response())
     } else {
         let _inflight = if let Some(ref did) = deployment_id {
-            InFlightGuard::new_for_deployment(state.inflight.clone(), &inflight_model, did, input_chars as u64)
+            InFlightGuard::new_for_deployment(
+                state.inflight.clone(),
+                &inflight_model,
+                did,
+                input_chars as u64,
+            )
         } else {
             InFlightGuard::new(state.inflight.clone(), &inflight_model, input_chars as u64)
         };
         let response = match provider.chat(openai_req).await {
             Ok(r) => r,
             Err(e) => {
-                log_error(&state, &identity, &model, "/v1/messages", false, start, &e, Some(request_id.clone()), deployment_id.clone(), debug_req_body.clone(), Some(client_ip.clone()));
+                log_error(
+                    &state,
+                    identity,
+                    &model,
+                    "/v1/messages",
+                    false,
+                    start,
+                    &e,
+                    Some(request_id.clone()),
+                    deployment_id.clone(),
+                    debug_req_body.clone(),
+                    Some(client_ip.clone()),
+                );
                 crate::health_monitor::record_request_failure(&state, &deployment_id, &e);
                 // plan_charge drops here without commit — no quota consumed.
                 return Err(AnthropicErrorReply(e, false));
@@ -2729,7 +3206,7 @@ pub async fn messages(
             .unwrap_or(0);
         plan_charge.settle(
             input_tokens as u64,
-            cached_tokens_i64.max(0) as u64,
+            cached_tokens_i64 as u64,
             output_tokens as u64,
             None,
         );
@@ -2771,7 +3248,9 @@ pub async fn messages(
                 request_tokens: request_bytes,
             },
         );
-        state.agent_stats.record_tokens("/v1/messages", input_tokens as u64, output_tokens as u64);
+        state
+            .agent_stats
+            .record_tokens("/v1/messages", input_tokens as u64, output_tokens as u64);
 
         let anthropic_resp = openai_response_to_anthropic(&response);
 
@@ -2795,11 +3274,13 @@ pub async fn messages(
                     if let Some(ref raw) = response.raw_response {
                         prompt_entry.set_raw_upstream_response(
                             serde_json::from_str::<serde_json::Value>(raw)
-                                .unwrap_or(serde_json::Value::String(raw.clone()))
+                                .unwrap_or(serde_json::Value::String(raw.clone())),
                         );
                     }
                 }
-                prompt_entry.set_response(serde_json::to_value(&anthropic_resp).unwrap_or(serde_json::Value::Null));
+                prompt_entry.set_response(
+                    serde_json::to_value(&anthropic_resp).unwrap_or(serde_json::Value::Null),
+                );
                 prompt_entry.set_status(200, duration_ms as u64);
                 let _ = sender.send(prompt_entry);
             }
@@ -3006,9 +3487,7 @@ fn sse_raw_data_extractor() -> impl FnMut(&Result<SseItem, Infallible>) -> Optio
 // ═══════════════════════════════════════════════════════════
 
 /// GET /internal/kv-index — dump KV index status with hash details (pretty-printed).
-pub async fn kv_index_status(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub async fn kv_index_status(State(state): State<AppState>) -> impl IntoResponse {
     // Debug snapshot of the kvc_aware config currently in effect (helps verify
     // that reload picked up the latest settings).
     let cfg = &state.inner.load().config.router_settings;
@@ -3063,14 +3542,13 @@ pub async fn kv_index_status(
         axum::http::StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         pretty,
-    ).into_response()
+    )
+        .into_response()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_gateway_headers, is_vip_key, preferred_stream_usage, UsageTrackerState,
-    };
+    use super::{build_gateway_headers, is_vip_key, preferred_stream_usage, UsageTrackerState};
     use boom_core::types::{PromptTokensDetails, Usage};
     use serde_json::json;
 
@@ -3119,25 +3597,37 @@ mod tests {
     #[test]
     fn headers_enabled_vip_gives_100() {
         let headers = build_gateway_headers(true, true, "/v1/chat/completions", false);
-        assert_eq!(headers.get("X-Gateway-Priority").map(String::as_str), Some("100"));
+        assert_eq!(
+            headers.get("X-Gateway-Priority").map(String::as_str),
+            Some("100")
+        );
     }
 
     #[test]
     fn headers_enabled_normal_gives_0() {
         let headers = build_gateway_headers(false, true, "/v1/chat/completions", false);
-        assert_eq!(headers.get("X-Gateway-Priority").map(String::as_str), Some("0"));
+        assert_eq!(
+            headers.get("X-Gateway-Priority").map(String::as_str),
+            Some("0")
+        );
     }
 
     #[test]
     fn headers_disabled_vip_is_empty() {
         let headers = build_gateway_headers(true, false, "/v1/chat/completions", false);
-        assert!(headers.is_empty(), "no header should be injected when disabled");
+        assert!(
+            headers.is_empty(),
+            "no header should be injected when disabled"
+        );
     }
 
     #[test]
     fn headers_disabled_normal_is_empty() {
         let headers = build_gateway_headers(false, false, "/v1/chat/completions", false);
-        assert!(headers.is_empty(), "no header should be injected when disabled");
+        assert!(
+            headers.is_empty(),
+            "no header should be injected when disabled"
+        );
     }
 
     #[test]

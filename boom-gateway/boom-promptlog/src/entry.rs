@@ -50,6 +50,7 @@ pub struct PromptLogEntry {
 }
 
 impl PromptLogEntry {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         request_id: &str,
         key_hash: &str,
@@ -62,8 +63,8 @@ impl PromptLogEntry {
         client_ip: Option<&str>,
         headers: Option<HashMap<String, String>>,
     ) -> Self {
-        let domain_account = key_alias
-            .and_then(|a| a.rsplit_once(' ').map(|(_, last)| last.to_string()));
+        let domain_account =
+            key_alias.and_then(|a| a.rsplit_once(' ').map(|(_, last)| last.to_string()));
         Self {
             request_id: request_id.to_string(),
             timestamp: chrono::Utc::now().to_rfc3339(),
