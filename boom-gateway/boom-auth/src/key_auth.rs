@@ -125,6 +125,29 @@ impl DbAuthenticator {
         }
     }
 
+    /// Resolve litellm special model names in `team.models`.
+    ///
+    /// litellm stores special identifiers in `team.models`:
+    /// - `"all-team-models"` → all of this team's keys have full access
+    /// - `"all-proxy-models"` → all models on this proxy
+    ///
+    /// Both collapse to an empty Vec here, so the downstream `is_empty()`
+    /// check in routes treats the key/team as unrestricted. Without this
+    /// second-pass resolution, a key with `models=["all-team-models"]`
+    /// whose team *also* has `models=["all-team-models"]` would end up
+    /// with `identity.models=["all-team-models"]` (literal string), and
+    /// `check_model_access` would reject every real model.
+    fn resolve_team_models(team_models: Vec<String>) -> Vec<String> {
+        if team_models
+            .iter()
+            .any(|m| m == "all-team-models" || m == "all-proxy-models")
+        {
+            vec![]
+        } else {
+            team_models
+        }
+    }
+
     /// Query team's allowed models and alias from boom_team_table.
     async fn lookup_team(
         &self,
@@ -201,6 +224,7 @@ impl Authenticator for DbAuthenticator {
         if let Some(ref team_id) = identity.team_id {
             match self.lookup_team(team_id).await {
                 Ok((team_models, team_alias)) => {
+                    let team_models = Self::resolve_team_models(team_models);
                     tracing::debug!(
                         "Resolved team for team {}: models={:?}, alias={:?}",
                         team_id,
@@ -266,7 +290,7 @@ impl Authenticator for DbAuthenticator {
     }
 
     fn check_model_access(&self, identity: &AuthIdentity, model: &str) -> Result<(), GatewayError> {
-        tracing::info!(
+        tracing::debug!(
             "check_model_access: key={:?}, requested={}, key_models={:?}, team_models={:?}",
             identity.key_name,
             model,
@@ -276,7 +300,7 @@ impl Authenticator for DbAuthenticator {
         if identity.can_call_model(model) {
             Ok(())
         } else {
-            tracing::warn!(
+            tracing::debug!(
                 "Model not allowed: key={:?}, requested={}, key_models={:?}, team_models={:?}",
                 identity.key_name,
                 model,
@@ -358,5 +382,42 @@ mod tests {
         h.update(raw.as_bytes());
         let expected = hex::encode(h.finalize());
         assert_eq!(digest, expected);
+    }
+
+    /// Regression: a team whose `models` column itself contains the special
+    /// name `"all-team-models"` (litellm semantic = full access) must be
+    /// collapsed to an empty Vec before being assigned to
+    /// `identity.team_models`. Otherwise the parent key's `all-team-models`
+    /// resolution copies the literal string forward and `check_model_access`
+    /// rejects every real model.
+    #[test]
+    fn resolve_team_models_collapses_all_team_models() {
+        assert_eq!(
+            DbAuthenticator::resolve_team_models(vec!["all-team-models".to_string()]),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            DbAuthenticator::resolve_team_models(vec!["all-proxy-models".to_string()]),
+            Vec::<String>::new()
+        );
+        // Mixed: one special name ⇒ collapse the whole list.
+        assert_eq!(
+            DbAuthenticator::resolve_team_models(vec![
+                "all-team-models".to_string(),
+                "gpt-4".to_string(),
+            ]),
+            Vec::<String>::new()
+        );
+    }
+
+    /// Real model names pass through unchanged.
+    #[test]
+    fn resolve_team_models_passes_through_real_models() {
+        let input = vec!["gpt-4".to_string(), "claude-3".to_string()];
+        assert_eq!(DbAuthenticator::resolve_team_models(input.clone()), input);
+        assert_eq!(
+            DbAuthenticator::resolve_team_models(vec![]),
+            Vec::<String>::new()
+        );
     }
 }

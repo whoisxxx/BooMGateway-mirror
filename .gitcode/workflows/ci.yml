@@ -4,9 +4,9 @@ name: ci
 
 on:
   push:
-    branches: ["main", "dev"]
+    branches: ["master", "dev"]
   pull_request:
-    branches: ["main", "dev"]
+    branches: ["master", "dev"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,6 +18,10 @@ jobs:
     runs-on: euleros-2.10.1
     steps:
       - uses: checkout-action@0.0.1
+
+      - name: Install system dependencies
+        run: |
+          sudo dnf install -y openssl-devel libpq-devel protobuf-compiler cmake gcc make
 
       - name: Install Rust
         run: |
@@ -57,6 +61,10 @@ jobs:
     steps:
       - uses: checkout-action@0.0.1
 
+      - name: Install system dependencies
+        run: |
+          sudo dnf install -y openssl-devel libpq-devel protobuf-compiler cmake gcc make
+
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -83,6 +91,10 @@ jobs:
     needs: build-and-lint
     steps:
       - uses: checkout-action@0.0.1
+
+      - name: Install system dependencies
+        run: |
+          sudo dnf install -y openssl-devel libpq-devel protobuf-compiler cmake gcc make
 
       - name: Install Rust
         run: |
